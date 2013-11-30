@@ -1,0 +1,10 @@
+syntax: glob
+bin
+obj
+*.suo
+Bin
+_ReSharper.*
+TestResults/*
+*.user.hgignore
+.hgtags
+.hg
