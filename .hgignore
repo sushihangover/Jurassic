@@ -5,4 +5,8 @@ obj
 Bin
 _ReSharper.*
 TestResults/*
-*.user
+*.user.DS_Store
+.git/*
+.DS_Store
+*/.DS_Store
+.gitignore
