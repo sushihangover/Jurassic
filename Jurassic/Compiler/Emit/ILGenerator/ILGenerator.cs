@@ -8,21 +8,14 @@ namespace Jurassic.Compiler
     /// </summary>
     internal abstract class ILGenerator
     {
-        ///// <summary>
-        ///// Gets or sets a value which indicates whether diagnostics are enabled.  Better error
-        ///// messages are provided in some cases if this property is set to <c>true</c>, however
-        ///// performance and memory usage are negatively impacted.
-        ///// </summary>
-        //public bool EnableDiagnostics
-        //{
-        //    get;
-        //    set;
-        //}
-
-
 
         //     BUFFER MANAGEMENT
         //_________________________________________________________________________________________
+
+        /// <summary>
+        /// Gets the size of the method, in bytes.
+        /// </summary>
+        public abstract int CodeLength { get; }
 
         /// <summary>
         /// Emits a return statement and finalizes the generated code.  Do not emit any more
@@ -153,29 +146,11 @@ namespace Jurassic.Compiler
         public abstract void BranchIfGreaterThan(ILLabel label);
 
         /// <summary>
-        /// Branches to the given label if the first value on the stack is greater than the second
-        /// value on the stack.  If the operands are integers then they are treated as if they are
-        /// unsigned.  If the operands are floating point numbers then a NaN value will trigger a
-        /// branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public abstract void BranchIfGreaterThanUnsigned(ILLabel label);
-
-        /// <summary>
         /// Branches to the given label if the first value on the stack is greater than or equal to
         /// the second value on the stack.
         /// </summary>
         /// <param name="label"> The label to branch to. </param>
         public abstract void BranchIfGreaterThanOrEqual(ILLabel label);
-
-        /// <summary>
-        /// Branches to the given label if the first value on the stack is greater than or equal to
-        /// the second value on the stack.  If the operands are integers then they are treated as
-        /// if they are unsigned.  If the operands are floating point numbers then a NaN value will
-        /// trigger a branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public abstract void BranchIfGreaterThanOrEqualUnsigned(ILLabel label);
 
         /// <summary>
         /// Branches to the given label if the first value on the stack is less than the second
@@ -185,15 +160,6 @@ namespace Jurassic.Compiler
         public abstract void BranchIfLessThan(ILLabel label);
 
         /// <summary>
-        /// Branches to the given label if the first value on the stack is less than the second
-        /// value on the stack.  If the operands are integers then they are treated as if they are
-        /// unsigned.  If the operands are floating point numbers then a NaN value will trigger a
-        /// branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public abstract void BranchIfLessThanUnsigned(ILLabel label);
-
-        /// <summary>
         /// Branches to the given label if the first value on the stack is less than or equal to
         /// the second value on the stack.
         /// </summary>
@@ -201,26 +167,10 @@ namespace Jurassic.Compiler
         public abstract void BranchIfLessThanOrEqual(ILLabel label);
 
         /// <summary>
-        /// Branches to the given label if the first value on the stack is less than or equal to
-        /// the second value on the stack.  If the operands are integers then they are treated as
-        /// if they are unsigned.  If the operands are floating point numbers then a NaN value will
-        /// trigger a branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public abstract void BranchIfLessThanOrEqualUnsigned(ILLabel label);
-
-        /// <summary>
         /// Returns from the current method.  A value is popped from the stack and used as the
         /// return value.
         /// </summary>
         public abstract void Return();
-
-        /// <summary>
-        /// Creates a jump table.  A value is popped from the stack - this value indicates the
-        /// index of the label in the <paramref name="labels"/> array to jump to.
-        /// </summary>
-        /// <param name="labels"> A array of labels. </param>
-        public abstract void Switch(ILLabel[] labels);
 
 
 
@@ -360,12 +310,6 @@ namespace Jurassic.Compiler
         public abstract void LoadInt32(int value);
 
         /// <summary>
-        /// Pushes a 64-bit constant value onto the stack.
-        /// </summary>
-        /// <param name="value"> The 64-bit integer to push onto the stack. </param>
-        public abstract void LoadInt64(long value);
-
-        /// <summary>
         /// Pushes a constant value onto the stack.
         /// </summary>
         /// <param name="value"> The number to push onto the stack. </param>
@@ -387,35 +331,35 @@ namespace Jurassic.Compiler
         /// is equal to the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public abstract void CompareEqual();
+        public abstract void Equal();
 
         /// <summary>
         /// Pops two values from the stack, compares, then pushes <c>1</c> if the first argument
         /// is greater than the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public abstract void CompareGreaterThan();
+        public abstract void GreaterThan();
 
         /// <summary>
         /// Pops two values from the stack, compares, then pushes <c>1</c> if the first argument
         /// is greater than the second, or <c>0</c> otherwise.  Produces <c>1</c> if one or both
         /// of the arguments are <c>NaN</c>.  Integers are considered to be unsigned.
         /// </summary>
-        public abstract void CompareGreaterThanUnsigned();
+        public abstract void GreaterThanUnsigned();
 
         /// <summary>
         /// Pops two values from the stack, compares, then pushes <c>1</c> if the first argument
         /// is less than the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public abstract void CompareLessThan();
+        public abstract void LessThan();
 
         /// <summary>
         /// Pops two values from the stack, compares, then pushes <c>1</c> if the first argument
         /// is less than the second, or <c>0</c> otherwise.  Produces <c>1</c> if one or both
         /// of the arguments are <c>NaN</c>.  Integers are considered to be unsigned.
         /// </summary>
-        public abstract void CompareLessThanUnsigned();
+        public abstract void LessThanUnsigned();
 
 
 
@@ -507,34 +451,15 @@ namespace Jurassic.Compiler
         /// Pops a value from the stack, converts it to an object reference, then pushes it back onto
         /// the stack.
         /// </summary>
-        /// <param name="type"> The type of value to box.  This should be a value type. </param>
         public abstract void Box(Type type);
 
         /// <summary>
         /// Pops a value from the stack, converts it to an object reference, then pushes it back onto
         /// the stack.
         /// </summary>
-        /// <param name="type"> The type of value to box.  This should be a value type. </param>
         public void Box(PrimitiveType type)
         {
             Box(PrimitiveTypeUtilities.ToType(type));
-        }
-
-        /// <summary>
-        /// Pops an object reference (representing a boxed value) from the stack, extracts the value,
-        /// then pushes the value onto the stack.
-        /// </summary>
-        /// <param name="type"> The type of the boxed value.  This should be a value type. </param>
-        public abstract void Unbox(Type type);
-
-        /// <summary>
-        /// Pops an object reference (representing a boxed value) from the stack, extracts the value,
-        /// then pushes the value onto the stack.
-        /// </summary>
-        /// <param name="type"> The type of the boxed value.  This should be a value type. </param>
-        public void Unbox(PrimitiveType type)
-        {
-            Unbox(PrimitiveTypeUtilities.ToType(type));
         }
 
         /// <summary>
@@ -665,13 +590,35 @@ namespace Jurassic.Compiler
         /// <param name="method"> The method to retrieve a pointer for. </param>
         public void LoadMethodPointer(System.Reflection.MethodInfo method)
         {
-            if (method == null)
-                throw new ArgumentNullException("method");
             if (method.IsStatic == true || method.DeclaringType.IsValueType == true)
                 LoadStaticMethodPointer(method);
             else
                 LoadVirtualMethodPointer(method);
         }
+
+        /// <summary>
+        /// Pops the method arguments off the stack, pops a method pointer off the stack, calls the
+        /// unmanaged method indicated by the method pointer, then pushes the result to the stack (if
+        /// there was one).
+        /// </summary>
+        /// <param name="unmanagedCallingConvention"> The unmanaged calling convention. </param>
+        /// <param name="returnType"> The return type for the method to be called. </param>
+        /// <param name="parameterTypes"> The types for each parameter accepted by the method
+        /// (including the "this" parameter, if present). </param>
+        public abstract void CallIndirect(System.Runtime.InteropServices.CallingConvention unmanagedCallingConvention, Type returnType, Type[] parameterTypes);
+
+        /// <summary>
+        /// Pops the method arguments off the stack, pops a method pointer off the stack, calls the
+        /// managed method indicated by the method pointer, then pushes the result to the stack
+        /// (if there was one).
+        /// </summary>
+        /// <param name="callingConvention"> The managed calling convention. </param>
+        /// <param name="returnType"> The return type for the method to be called. </param>
+        /// <param name="parameterTypes"> The types for each parameter accepted by the method
+        /// (including the "this" parameter, if present). </param>
+        /// <param name="optionalParameterTypes"> The types for each optional parameter (only
+        /// applies to varargs calls). </param>
+        public abstract void CallIndirect(System.Reflection.CallingConventions callingConvention, Type returnType, Type[] parameterTypes, Type[] optionalParameterTypes = null);
 
 
 
@@ -793,45 +740,13 @@ namespace Jurassic.Compiler
         public abstract void EndFilter();
 
 
-        //     DEBUGGING SUPPORT
+        //     MISC
         //_________________________________________________________________________________________
 
         /// <summary>
         /// Triggers a breakpoint in an attached debugger.
         /// </summary>
         public abstract void Breakpoint();
-
-        /// <summary>
-        /// Marks a sequence point in the Microsoft intermediate language (MSIL) stream.
-        /// </summary>
-        /// <param name="document"> The document for which the sequence point is being defined. </param>
-        /// <param name="span"> The start and end positions which define the sequence point. </param>
-        public void MarkSequencePoint(System.Diagnostics.SymbolStore.ISymbolDocumentWriter document, SourceCodeSpan span)
-        {
-            if (span == null)
-                throw new ArgumentNullException("span");
-            MarkSequencePoint(document, span.StartLine, span.StartColumn, span.EndLine, span.EndColumn);
-        }
-
-        /// <summary>
-        /// Marks a sequence point in the Microsoft intermediate language (MSIL) stream.
-        /// </summary>
-        /// <param name="document"> The document for which the sequence point is being defined. </param>
-        /// <param name="startLine"> The line where the sequence point begins. </param>
-        /// <param name="startColumn"> The column in the line where the sequence point begins. </param>
-        /// <param name="endLine"> The line where the sequence point ends. </param>
-        /// <param name="endColumn"> The column in the line where the sequence point ends. </param>
-        public abstract void MarkSequencePoint(System.Diagnostics.SymbolStore.ISymbolDocumentWriter document, int startLine, int startColumn, int endLine, int endColumn);
-
-
-
-        //     MISC
-        //_________________________________________________________________________________________
-
-        /// <summary>
-        /// Does nothing.
-        /// </summary>
-        public abstract void NoOperation();
     }
 
 }

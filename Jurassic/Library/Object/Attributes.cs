@@ -12,7 +12,7 @@ namespace Jurassic.Library
         /// Creates a new BaseJSFunctionAttribute instance with no flags.
         /// </summary>
         protected BaseJSFunctionAttribute()
-            : this(JSFunctionFlags.None)
+            : this(FunctionBinderFlags.None)
         {
         }
 
@@ -20,7 +20,7 @@ namespace Jurassic.Library
         /// Creates a new BaseJSFunctionAttribute instance.
         /// </summary>
         /// <param name="flags"> One or more flags. </param>
-        protected BaseJSFunctionAttribute(JSFunctionFlags flags)
+        protected BaseJSFunctionAttribute(FunctionBinderFlags flags)
         {
             this.Flags = flags;
         }
@@ -28,7 +28,7 @@ namespace Jurassic.Library
         /// <summary>
         /// Gets or sets the flags associated with the function.
         /// </summary>
-        public JSFunctionFlags Flags
+        public FunctionBinderFlags Flags
         {
             get;
             set;
@@ -44,7 +44,7 @@ namespace Jurassic.Library
         /// Creates a new JSFunctionAttribute instance with no flags.
         /// </summary>
         public JSFunctionAttribute()
-            : base(JSFunctionFlags.None)
+            : base(FunctionBinderFlags.None)
         {
             this.Length = -1;
         }
@@ -117,7 +117,7 @@ namespace Jurassic.Library
     /// the wrong type is passed to the function, a TypeError exception will be thrown.
     /// </summary>
     [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
-    internal sealed class JSDoNotConvertAttribute : Attribute
+    public sealed class JSDoNotConvertAttribute : Attribute
     {
     }
 }

@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents an instance of the JavaScript Array object.
     /// </summary>
-    [Serializable]
     public class ArrayInstance : ObjectInstance
     {
         // The array, if it is dense.
@@ -26,17 +26,9 @@ namespace Jurassic.Library
         //     INITIALIZATION
         //_________________________________________________________________________________________
 
-        /// <summary>
-        /// Creates a new array with the given length and capacity.
-        /// </summary>
-        /// <param name="prototype"> The next object in the prototype chain. </param>
-        /// <param name="length"> The initial value of the length property. </param>
-        /// <param name="capacity"> The number of elements to allocate. </param>
-        internal ArrayInstance(ObjectInstance prototype, uint length, uint capacity)
+        public ArrayInstance(ObjectInstance prototype, uint length, uint capacity)
             : base(prototype)
         {
-            if (length > capacity)
-                throw new ArgumentOutOfRangeException("length", "length must be less than or equal to capacity.");
             if (length <= 1000)
             {
                 this.dense = new object[(int)capacity];
@@ -52,12 +44,7 @@ namespace Jurassic.Library
             FastSetProperty("length", -1, PropertyAttributes.Writable | PropertyAttributes.IsLengthProperty);
         }
 
-        /// <summary>
-        /// Creates a new array and initializes it with the given array.
-        /// </summary>
-        /// <param name="prototype"> The next object in the prototype chain. </param>
-        /// <param name="elements"> The initial values in the array. </param>
-        internal ArrayInstance(ObjectInstance prototype, object[] elements)
+        public ArrayInstance(ObjectInstance prototype, object[] elements)
             : base(prototype)
         {
             if (elements == null)
@@ -71,12 +58,6 @@ namespace Jurassic.Library
             FastSetProperty("length", -1, PropertyAttributes.Writable | PropertyAttributes.IsLengthProperty);
         }
 
-        /// <summary>
-        /// Creates a new array and initializes it with the given sparse array.
-        /// </summary>
-        /// <param name="prototype"> The next object in the prototype chain. </param>
-        /// <param name="sparseArray"> The sparse array to use as the backing store. </param>
-        /// <param name="length"> The initial value of the length property. </param>
         private ArrayInstance(ObjectInstance prototype, SparseArray sparseArray, uint length)
             : base(prototype)
         {
@@ -117,35 +98,14 @@ namespace Jurassic.Library
 
                 if (this.dense != null)
                 {
-                    if (this.length < this.dense.Length / 2 && this.dense.Length > 100)
-                    {
-                        // Shrink the array.
-                        ResizeDenseArray(this.length + 10, this.length);
-                    }
-                    else if (this.length > this.dense.Length + 10)
-                    {
-                        // Switch to a sparse array.
-                        this.sparse = SparseArray.FromDenseArray(this.dense, (int)previousLength);
-                        this.dense = null;
-                    }
-                    else if (this.length > this.dense.Length)
-                    {
-                        // Enlarge the array.
-                        ResizeDenseArray(this.length + 10, previousLength);
+                    // Resize the array.
+                    ResizeDenseArray(this.length);
+                    if (this.length > previousLength)
                         this.denseMayContainHoles = true;
-                    }
-                    else if (this.length > previousLength)
-                    {
-                        // Increasing the length property creates an array with holes.
-                        this.denseMayContainHoles = true;
-
-                        // Remove all the elements with indices >= length.
-                        Array.Clear(this.dense, (int)previousLength, (int)(this.length - previousLength));
-                    }
                 }
                 else
                 {
-                    // Remove all the elements with indices >= length.
+                    // Remove all the elements with indices > length.
                     if (this.length < previousLength)
                         this.sparse.DeleteRange(this.length, previousLength - this.length);
                 }
@@ -278,10 +238,10 @@ namespace Jurassic.Library
                 else
                 {
                     // The index is out of range - either enlarge the array or switch to sparse.
-                    if (index < this.dense.Length + 10)
+                    if (index < this.dense.Length * 2 + 10)
                     {
                         // Enlarge the dense array.
-                        ResizeDenseArray((uint)(this.dense.Length * 2 + 10), this.length);
+                        ResizeDenseArray((uint)(this.dense.Length * 2 + 10));
 
                         // Set the value.
                         this.dense[index] = value;
@@ -290,7 +250,7 @@ namespace Jurassic.Library
                     else
                     {
                         // Switch to a sparse array.
-                        this.sparse = SparseArray.FromDenseArray(this.dense, (int)this.length);
+                        this.sparse = SparseArray.FromDenseArray(this.dense);
                         this.dense = null;
                         this.sparse[index] = value;
                     }
@@ -303,7 +263,7 @@ namespace Jurassic.Library
             {
                 // Set the value and update the length.
                 this.sparse[index] = value;
-                this.length = Math.Max(this.length, index + 1);
+                this.length = index + 1;
             }
         }
 
@@ -348,7 +308,7 @@ namespace Jurassic.Library
                 if (descriptor.IsAccessor == true)
                 {
                     if (throwOnError == true)
-                        throw new JavaScriptException(this.Engine, "TypeError", string.Format("Accessors are not supported for array elements.", propertyName));
+                        throw new JavaScriptException("TypeError", string.Format("Accessors are not supported for array elements.", propertyName));
                     return false;
                 }
 
@@ -356,7 +316,7 @@ namespace Jurassic.Library
                 if (descriptor.Attributes != PropertyAttributes.FullAccess)
                 {
                     if (throwOnError == true)
-                        throw new JavaScriptException(this.Engine, "TypeError", string.Format("Non-accessible array elements are not supported.", propertyName));
+                        throw new JavaScriptException("TypeError", string.Format("Non-accessible array elements are not supported.", propertyName));
                     return false;
                 }
 
@@ -421,7 +381,7 @@ namespace Jurassic.Library
         /// <param name="items"> Any number of items to append. </param>
         /// <returns> A new array consisting of the values of this array plus any number of
         /// additional items. </returns>
-        [JSFunction(Name = "concat", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "concat", Flags = FunctionBinderFlags.HasThisObject)]
         public static ArrayInstance Concat(ObjectInstance thisObj, params object[] items)
         {
             // Create a new items array with the thisObject at the beginning.
@@ -444,7 +404,7 @@ namespace Jurassic.Library
 
             // This method only supports arrays of length up to 2^31-1, rather than 2^32-1.
             if (length > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The resulting array is too long");
+                throw new JavaScriptException("RangeError", "The resulting array is too long");
 
             if (dense == true)
             {
@@ -459,13 +419,6 @@ namespace Jurassic.Library
                         // Add the items in the array to the end of the resulting array.
                         var array = (ArrayInstance)item;
                         Array.Copy(array.dense, 0, result, index, (int)array.Length);
-                        if (array.denseMayContainHoles == true && array.Prototype != null)
-                        {
-                            // Populate holes from the prototype.
-                            for (uint i = 0; i < array.length; i++)
-                                if (array.dense[i] == null)
-                                    result[index + i] = array.Prototype.GetPropertyValue(i);
-                        }
                         index += (int)array.Length;
                     }
                     else
@@ -476,7 +429,7 @@ namespace Jurassic.Library
                 }
 
                 // Return the new dense array.
-                return new ArrayInstance(thisObj.Engine.Array.InstancePrototype, result);
+                return new ArrayInstance(GlobalObject.Array.InstancePrototype, result);
             }
             else
             {
@@ -491,27 +444,9 @@ namespace Jurassic.Library
                         // Add the items in the array to the end of the resulting array.
                         var array = (ArrayInstance)item;
                         if (array.dense != null)
-                        {
                             result.CopyTo(array.dense, (uint)index, (int)array.Length);
-                            if (array.Prototype != null)
-                            {
-                                // Populate holes from the prototype.
-                                for (uint i = 0; i < array.length; i++)
-                                    if (array.dense[i] == null)
-                                        result[(uint)index + i] = array.Prototype.GetPropertyValue(i);
-                            }
-                        }
                         else
-                        {
                             result.CopyTo(array.sparse, (uint)index);
-                            if (array.Prototype != null)
-                            {
-                                // Populate holes from the prototype.
-                                for (uint i = 0; i < array.Length; i++)
-                                    if (array.sparse[i] == null)
-                                        result[(uint)index + i] = array.Prototype.GetPropertyValue(i);
-                            }
-                        }
                         index += (int)array.Length;
                     }
                     else
@@ -523,7 +458,7 @@ namespace Jurassic.Library
                 }
 
                 // Return the new sparse array.
-                return new ArrayInstance(thisObj.Engine.Array.InstancePrototype, result, length);
+                return new ArrayInstance(GlobalObject.Array.InstancePrototype, result, length);
             }
         }
 
@@ -534,7 +469,7 @@ namespace Jurassic.Library
         /// <param name="thisObj"> The array that is being operated on. </param>
         /// <param name="separator"> The string to use as a separator. </param>
         /// <returns> A string that consists of the element values separated by the separator string. </returns>
-        [JSFunction(Name = "join", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "join", Flags = FunctionBinderFlags.HasThisObject)]
         public static string Join(ObjectInstance thisObj, string separator = ",")
         {
             // Get the length of the array.
@@ -542,7 +477,7 @@ namespace Jurassic.Library
 
             // This method only supports strings of length up to 2^31-1.
             if (arrayLength > int.MaxValue / 2)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             var result = new System.Text.StringBuilder((int)arrayLength * 2);
             try
@@ -560,7 +495,7 @@ namespace Jurassic.Library
             }
             catch (ArgumentOutOfRangeException)
             {
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
             }
             return result.ToString();
         }
@@ -570,7 +505,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="thisObj"> The array to operate on. </param>
         /// <returns> The last element from the array. </returns>
-        [JSFunction(Name = "pop", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "pop", Flags = FunctionBinderFlags.HasThisObject)]
         public static object Pop(ObjectInstance thisObj)
         {
             // If the "this" object is an array, use the fast version of this method.
@@ -621,16 +556,12 @@ namespace Jurassic.Library
                 // Get the last value.
                 var result = this.dense[this.length];
 
-                // If the element does not exist in this array, it may exist in the prototype.
-                if (result == null && this.Prototype != null)
-                    result = this.Prototype.GetPropertyValue(this.length);
-
                 // Delete it from the array.
                 this.dense[this.length] = null;
 
                 // Check if the array should be shrunk.
                 if (this.length < this.dense.Length / 2 && this.length > 10)
-                    ResizeDenseArray((uint)(this.dense.Length / 2 + 10), this.length);
+                    ResizeDenseArray((uint)(this.dense.Length / 2 + 10));
 
                 // Return the last value.
                 return result;
@@ -639,10 +570,6 @@ namespace Jurassic.Library
             {
                 // Get the last value.
                 var result = this.sparse[this.length];
-
-                // If the element does not exist in this array, it may exist in the prototype.
-                if (result == null && this.Prototype != null)
-                    result = this.Prototype.GetPropertyValue(this.length);
 
                 // Delete it from the array.
                 this.sparse.Delete(this.length);
@@ -657,8 +584,8 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="thisObj"> The array that is being operated on. </param>
         /// <param name="items"> The items to append to the array. </param>
-        [JSFunction(Name = "push", Flags = JSFunctionFlags.HasThisObject)]
-        public static double Push(ObjectInstance thisObj, params object[] items)
+        [JSFunction(Name = "push", Flags = FunctionBinderFlags.HasThisObject)]
+        public static int Push(ObjectInstance thisObj, params object[] items)
         {
             // If the "this" object is an array, use the fast version of this method.
             if (thisObj is ArrayInstance && items.Length == 1)
@@ -667,20 +594,9 @@ namespace Jurassic.Library
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
+            // This method only supports strings of length up to 2^31-1.
             if (arrayLength > uint.MaxValue - items.Length)
-            {
-                // Even though attempting to push more items than can fit in the array raises an
-                // error, the items are still pushed correctly (but the length is stuck at the
-                // maximum).
-                double arrayLength2 = arrayLength;
-                for (int i = 0; i < items.Length; i++)
-                {
-                    // Append the new item to the array.
-                    thisObj.SetPropertyValue((arrayLength2++).ToString(), items[i], true);
-                }
-                SetLength(thisObj, uint.MaxValue);
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "Invalid array length");
-            }
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             // For each item to append.
             for (int i = 0; i < items.Length; i++)
@@ -693,7 +609,7 @@ namespace Jurassic.Library
             SetLength(thisObj, arrayLength);
 
             // Return the new length.
-            return (double)arrayLength;
+            return (int)arrayLength;
         }
 
         /// <summary>
@@ -702,20 +618,11 @@ namespace Jurassic.Library
         /// <param name="item"> The item to append to the array. </param>
         public int Push(object item)
         {
-            if (this.length == uint.MaxValue)
-            {
-                // Even though attempting to push more items than can fit in the array raises an
-                // error, the items are still pushed correctly (but the length is stuck at the
-                // maximum).
-                SetPropertyValue(this.length.ToString(), item, false);
-                throw new JavaScriptException(this.Engine, "RangeError", "Invalid array length");
-            }
-
             if (this.dense != null)
             {
                 // Check if we need to enlarge the array.
                 if (this.length == this.dense.Length)
-                    ResizeDenseArray(this.length * 2 + 10, this.length);
+                    ResizeDenseArray(this.length * 2 + 10);
 
                 // Append the new item to the array.
                 this.dense[this.length++] = item;
@@ -735,7 +642,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="thisObj"> The array that is being operated on. </param>
         /// <returns> The array that is being operated on. </returns>
-        [JSFunction(Name = "reverse", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "reverse", Flags = FunctionBinderFlags.HasThisObject)]
         public static ObjectInstance Reverse(ObjectInstance thisObj)
         {
             // Get the length of the array.
@@ -768,7 +675,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="thisObj"> The array that is being operated on. </param>
         /// <returns> The first element in the array. </returns>
-        [JSFunction(Name = "shift", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "shift", Flags = FunctionBinderFlags.HasThisObject)]
         public static object Shift(ObjectInstance thisObj)
         {
             // Get the length of the array.
@@ -815,7 +722,7 @@ namespace Jurassic.Library
         /// <paramref name="end"/> is less than or equal to <paramref name="start"/> then an empty
         /// array is returned. </param>
         /// <returns> A section of an array. </returns>
-        [JSFunction(Name = "slice", Flags = JSFunctionFlags.HasThisObject, Length = 2)]
+        [JSFunction(Name = "slice", Flags = FunctionBinderFlags.HasThisObject)]
         public static ArrayInstance Slice(ObjectInstance thisObj, int start, int end = int.MaxValue)
         {
             // Get the length of the array.
@@ -823,15 +730,15 @@ namespace Jurassic.Library
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             // Fix the arguments so they are positive and within the bounds of the array.
             if (start < 0)
                 start += (int)arrayLength;
             if (end < 0)
-                end += (int)arrayLength;
+                end += (int)arrayLength + 1;
             if (end <= start)
-                return thisObj.Engine.Array.New(new object[0]);
+                return GlobalObject.Array.New(new object[0]);
             start = Math.Min(Math.Max(start, 0), (int)arrayLength);
             end = Math.Min(Math.Max(end, 0), (int)arrayLength);
 
@@ -841,7 +748,7 @@ namespace Jurassic.Library
             {
                 result[i] = thisObj[(uint)(start + i)];
             }
-            return thisObj.Engine.Array.New(result);
+            return GlobalObject.Array.New(result);
         }
 
         /// <summary>
@@ -853,52 +760,18 @@ namespace Jurassic.Library
         /// less than the second argument, zero if the arguments are equal or a number greater than
         /// zero if the first argument is greater than Defaults to an ascending ASCII ordering. </param>
         /// <returns> The array that was sorted. </returns>
-        [JSFunction(Name = "sort", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "sort", Flags = FunctionBinderFlags.HasThisObject)]
         public static ObjectInstance Sort(ObjectInstance thisObj, FunctionInstance comparisonFunction = null)
         {
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
-            // An array of size 1 or less is already sorted.
-            if (arrayLength <= 1)
-                return thisObj;
-
             // Create a comparer delegate.
-            Func<object, object, double> comparer;
+            Comparison<object> comparer;
             if (comparisonFunction == null)
-                comparer = (a, b) =>
-                {
-                    if (a == null && b == null)
-                        return 0f;
-                    if (a == null)
-                        return 1f;
-                    if (b == null)
-                        return -1f;
-                    if (a == Undefined.Value && b == Undefined.Value)
-                        return 0f;
-                    if (a == Undefined.Value)
-                        return 1f;
-                    if (b == Undefined.Value)
-                        return -1f;
-                    return string.Compare(TypeConverter.ToString(a), TypeConverter.ToString(b), StringComparison.Ordinal);
-                };
+                comparer = (a, b) => string.Compare(TypeConverter.ToString(a), TypeConverter.ToString(b), StringComparison.Ordinal);
             else
-                comparer = (a, b) =>
-                {
-                    if (a == null && b == null)
-                        return 0f;
-                    if (a == null)
-                        return 1f;
-                    if (b == null)
-                        return -1f;
-                    if (a == Undefined.Value && b == Undefined.Value)
-                        return 0f;
-                    if (a == Undefined.Value)
-                        return 1f;
-                    if (b == Undefined.Value)
-                        return -1f;
-                    return TypeConverter.ToNumber(comparisonFunction.CallLateBound(thisObj.Engine.Global, a, b));
-                }; 
+                comparer = (a, b) => TypeConverter.ToInt32(comparisonFunction.CallLateBound(GlobalObject.Instance, a, b));
 
             try
             {
@@ -907,7 +780,7 @@ namespace Jurassic.Library
             }
             catch (IndexOutOfRangeException)
             {
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid comparison function");
+                throw new JavaScriptException("TypeError", "Invalid comparison function");
             }
 
             return thisObj;
@@ -921,7 +794,7 @@ namespace Jurassic.Library
         /// <param name="deleteCount"> The number of elements to delete. </param>
         /// <param name="items"> The items to insert. </param>
         /// <returns> An array containing the deleted elements, if any. </returns>
-        [JSFunction(Name = "splice", Flags = JSFunctionFlags.HasThisObject, Length = 2)]
+        [JSFunction(Name = "splice", Flags = FunctionBinderFlags.HasThisObject)]
         public static ArrayInstance Splice(ObjectInstance thisObj, int start, int deleteCount, params object[] items)
         {
             // Get the length of the array.
@@ -929,7 +802,7 @@ namespace Jurassic.Library
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             // Fix the arguments so they are positive and within the bounds of the array.
             if (start < 0)
@@ -950,14 +823,10 @@ namespace Jurassic.Library
             {
                 for (int i = start + items.Length; i < newLength; i++)
                     thisObj[(uint)i] = thisObj[(uint)(i - offset)];
-                
-                // Delete the trailing elements.
-                for (int i = newLength; i < arrayLength; i++)
-                    thisObj.Delete((uint)i, true);
             }
             else
             {
-                for (int i = newLength - 1; i >= start + items.Length; i--)
+                for (int i = newLength; i > start + items.Length; i--)
                     thisObj[(uint)i] = thisObj[(uint)(i - offset)];
             }
             SetLength(thisObj, (uint)newLength);
@@ -967,7 +836,7 @@ namespace Jurassic.Library
                 thisObj[(uint)(start + i)] = items[i];
 
             // Return the deleted items.
-            return thisObj.Engine.Array.New(deletedItems);
+            return GlobalObject.Array.New(deletedItems);
         }
 
         /// <summary>
@@ -976,7 +845,7 @@ namespace Jurassic.Library
         /// <param name="thisObj"> The array that is being operated on. </param>
         /// <param name="items"> The items to prepend. </param>
         /// <returns> The new length of the array. </returns>
-        [JSFunction(Name = "unshift", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "unshift", Flags = FunctionBinderFlags.HasThisObject)]
         public static uint Unshift(ObjectInstance thisObj, params object[] items)
         {
             // If the "this" object is an array and the array is dense, use the fast version of this method.
@@ -985,22 +854,22 @@ namespace Jurassic.Library
             {
                 // Dense arrays are supported up to 2^32-1.
                 if (array.length + items.Length > int.MaxValue)
-                    throw new JavaScriptException(thisObj.Engine, "RangeError", "Invalid array length");
+                    throw new JavaScriptException("RangeError", "Invalid array length");
 
                 if (array.denseMayContainHoles == true && array.Prototype != null)
                 {
                     // Find all the holes and populate them from the prototype.
-                    for (uint i = 0; i < array.length; i++)
+                    for (int i = 0; i < array.length; i++)
                         if (array.dense[i] == null)
-                            array.dense[i] = array.Prototype.GetPropertyValue(i);
+                            array.dense[i] = array.Prototype.GetPropertyValue((uint)i);
                 }
 
                 // Allocate some more space if required.
                 if (array.length + items.Length > array.dense.Length)
-                    array.ResizeDenseArray((uint)Math.Max(array.dense.Length * 2 + 10, array.length + items.Length * 10), array.length);
+                    array.ResizeDenseArray((uint)Math.Max(array.dense.Length * 2 + 10, array.length + items.Length * 10));
 
                 // Shift all the items up.
-                Array.Copy(array.dense, 0, array.dense, items.Length, (int)array.length);
+                Array.Copy(array.dense, 0, array.dense, items.Length, array.length);
 
                 // Prepend the new items.
                 for (int i = 0; i < items.Length; i++)
@@ -1018,7 +887,7 @@ namespace Jurassic.Library
 
             // This method supports arrays of length up to 2^32-1.
             if (uint.MaxValue - arrayLength < items.Length)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "Invalid array length");
+                throw new JavaScriptException("RangeError", "Invalid array length");
 
             // Update the length property.
             SetLength(thisObj, arrayLength + (uint)items.Length);
@@ -1040,7 +909,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="thisObj"> The array that is being operated on. </param>
         /// <returns> A locale-specific string representing this object. </returns>
-        [JSFunction(Name = "toLocaleString", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "toLocaleString", Flags = FunctionBinderFlags.HasThisObject)]
         public static string ToLocaleString(ObjectInstance thisObj)
         {
             // Get the length of the array.
@@ -1048,7 +917,7 @@ namespace Jurassic.Library
 
             // This method only supports arrays of length up to 2^30-1.
             if (arrayLength > int.MaxValue / 2)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             var result = new System.Text.StringBuilder((int)arrayLength * 2);
 
@@ -1069,13 +938,13 @@ namespace Jurassic.Library
 
                     // Convert the element to a string and append it to the result.
                     if (element != null && element != Undefined.Value && element != Null.Value)
-                        result.Append(TypeConverter.ToObject(thisObj.Engine, element).CallMemberFunction("toLocaleString"));
+                        result.Append(TypeConverter.ToObject(element).CallMemberFunction("toLocaleString"));
                 }
 
             }
             catch (ArgumentOutOfRangeException)
             {
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
             }
 
             return result.ToString();
@@ -1086,7 +955,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="thisObj"> The array that is being operated on. </param>
         /// <returns> A string representing this object. </returns>
-        [JSFunction(Name = "toString", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "toString", Flags = FunctionBinderFlags.HasThisObject)]
         public static string ToString(ObjectInstance thisObj)
         {
             // Try calling thisObj.join().
@@ -1095,7 +964,7 @@ namespace Jurassic.Library
                 return TypeConverter.ToString(result);
 
             // Otherwise, use the default Object.prototype.toString() method.
-            return ObjectInstance.ToStringJS(thisObj.Engine, thisObj);
+            return ObjectInstance.ToStringJS(thisObj);
         }
 
 
@@ -1112,7 +981,7 @@ namespace Jurassic.Library
         /// <param name="fromIndex"> The array index to start searching. </param>
         /// <returns> The index of the given search element in the array, or <c>-1</c> if the
         /// element wasn't found. </returns>
-        [JSFunction(Name = "indexOf", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "indexOf", Flags = FunctionBinderFlags.HasThisObject)]
         public static int IndexOf(ObjectInstance thisObj, object searchElement, int fromIndex = 0)
         {
             // Get the length of the array.
@@ -1120,11 +989,7 @@ namespace Jurassic.Library
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
-
-            // If fromIndex is less than zero, it is an offset from the end of the array.
-            if (fromIndex < 0)
-                fromIndex += (int)arrayLength;
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             for (int i = Math.Max(fromIndex, 0); i < arrayLength; i++)
             {
@@ -1142,21 +1007,6 @@ namespace Jurassic.Library
 
         /// <summary>
         /// Returns the index of the given search element in the array, searching backwards from
-        /// the end of the array.
-        /// </summary>
-        /// <param name="thisObj"> The array that is being operated on. </param>
-        /// <param name="searchElement"> The value to search for. </param>
-        /// <param name="fromIndex"> The array index to start searching. </param>
-        /// <returns> The index of the given search element in the array, or <c>-1</c> if the
-        /// element wasn't found. </returns>
-        [JSFunction(Name = "lastIndexOf", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
-        public static int LastIndexOf(ObjectInstance thisObj, object searchElement)
-        {
-            return LastIndexOf(thisObj, searchElement, int.MaxValue);
-        }
-
-        /// <summary>
-        /// Returns the index of the given search element in the array, searching backwards from
         /// <paramref name="fromIndex"/>.
         /// </summary>
         /// <param name="thisObj"> The array that is being operated on. </param>
@@ -1164,21 +1014,17 @@ namespace Jurassic.Library
         /// <param name="fromIndex"> The array index to start searching. </param>
         /// <returns> The index of the given search element in the array, or <c>-1</c> if the
         /// element wasn't found. </returns>
-        [JSFunction(Name = "lastIndexOf", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
-        public static int LastIndexOf(ObjectInstance thisObj, object searchElement, int fromIndex)
+        [JSFunction(Name = "lastIndexOf", Flags = FunctionBinderFlags.HasThisObject)]
+        public static int LastIndexOf(ObjectInstance thisObj, object searchElement, int fromIndex = int.MaxValue)
         {
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
-            // If fromIndex is less than zero, it is an offset from the end of the array.
-            if (fromIndex < 0)
-                fromIndex += (int)arrayLength;
-
-            for (int i = Math.Min((int)arrayLength - 1, fromIndex); i >= 0; i--)
+            for (int i = Math.Min((int)arrayLength - 1, fromIndex); i >= 0; i --)
             {
                 // Get the value of the array element.
                 object elementValue = thisObj[(uint)i];
@@ -1204,19 +1050,15 @@ namespace Jurassic.Library
         /// <param name="context"> The value of <c>this</c> in the context of the callback function. </param>
         /// <returns> <c>true</c> if every element of the array matches criteria defined by the
         /// given user-defined function; <c>false</c> otherwise. </returns>
-        [JSFunction(Name = "every", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "every", Flags = FunctionBinderFlags.HasThisObject)]
         public static bool Every(ObjectInstance thisObj, FunctionInstance callbackFunction, ObjectInstance context = null)
         {
-            // callbackFunction must be a valid function.
-            if (callbackFunction == null)
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid callback function");
-
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             for (int i = 0; i < arrayLength; i ++)
             {
@@ -1246,19 +1088,15 @@ namespace Jurassic.Library
         /// <param name="context"> The value of <c>this</c> in the context of the callback function. </param>
         /// <returns> <c>true</c> if at least one element of the array matches criteria defined by
         /// the given user-defined function; <c>false</c> otherwise. </returns>
-        [JSFunction(Name = "some", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "some", Flags = FunctionBinderFlags.HasThisObject)]
         public static bool Some(ObjectInstance thisObj, FunctionInstance callbackFunction, ObjectInstance context = null)
         {
-            // callbackFunction must be a valid function.
-            if (callbackFunction == null)
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid callback function");
-
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             for (int i = 0; i < arrayLength; i++)
             {
@@ -1284,19 +1122,15 @@ namespace Jurassic.Library
         /// array.  This function is called with three arguments: the value of the element, the
         /// index of the element, and the array that is being operated on. </param>
         /// <param name="context"> The value of <c>this</c> in the context of the callback function. </param>
-        [JSFunction(Name = "forEach", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "forEach", Flags = FunctionBinderFlags.HasThisObject)]
         public static void ForEach(ObjectInstance thisObj, FunctionInstance callbackFunction, ObjectInstance context = null)
         {
-            // callbackFunction must be a valid function.
-            if (callbackFunction == null)
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid callback function");
-
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             for (int i = 0; i < arrayLength; i++)
             {
@@ -1324,23 +1158,18 @@ namespace Jurassic.Library
         /// <param name="context"> The value of <c>this</c> in the context of the callback function. </param>
         /// <returns> A new array with the results of calling the given function on every element
         /// in the array. </returns>
-        [JSFunction(Name = "map", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "map", Flags = FunctionBinderFlags.HasThisObject)]
         public static ArrayInstance Map(ObjectInstance thisObj, FunctionInstance callbackFunction, ObjectInstance context = null)
         {
-            // callbackFunction must be a valid function.
-            if (callbackFunction == null)
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid callback function");
-
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             // Create a new array to hold the new values.
-            // The length of the output array is always equal to the length of the input array.
-            var resultArray = new ArrayInstance(thisObj.Engine.Array.InstancePrototype, arrayLength, arrayLength);
+            var resultArray = GlobalObject.Array.New();
 
             for (int i = 0; i < arrayLength; i++)
             {
@@ -1357,7 +1186,6 @@ namespace Jurassic.Library
                     resultArray[(uint)i] = result;
                 }
             }
-
             return resultArray;
         }
 
@@ -1373,22 +1201,18 @@ namespace Jurassic.Library
         /// <param name="context"> The value of <c>this</c> in the context of the callback function. </param>
         /// <returns> A copy of this array but with only those elements which produce <c>true</c>
         /// when passed to the provided function. </returns>
-        [JSFunction(Name = "filter", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "filter", Flags = FunctionBinderFlags.HasThisObject)]
         public static ArrayInstance Filter(ObjectInstance thisObj, FunctionInstance callbackFunction, ObjectInstance context = null)
         {
-            // callbackFunction must be a valid function.
-            if (callbackFunction == null)
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid callback function");
-
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             // Create a new array to hold the new values.
-            var result = thisObj.Engine.Array.New();
+            var result = GlobalObject.Array.New();
 
             for (int i = 0; i < arrayLength; i++)
             {
@@ -1421,19 +1245,15 @@ namespace Jurassic.Library
         /// <param name="initialValue"> The initial accumulated value. </param>
         /// <returns> The accumulated value returned from the last invocation of the callback
         /// function. </returns>
-        [JSFunction(Name = "reduce", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "reduce", Flags = FunctionBinderFlags.HasThisObject)]
         public static object Reduce(ObjectInstance thisObj, FunctionInstance callbackFunction, object initialValue = null)
         {
-            // callbackFunction must be a valid function.
-            if (callbackFunction == null)
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid callback function");
-
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             // If an initial value is not provided, the initial value is the first (defined) element.
             int i = 0;
@@ -1450,7 +1270,7 @@ namespace Jurassic.Library
                     }
                 }
                 if (accumulatedValue == null)
-                    throw new JavaScriptException(thisObj.Engine, "TypeError", "Reduce of empty array with no initial value");
+                    throw new JavaScriptException("TypeError", "Reduce of empty array with no initial value");
             }
 
             // Scan from low to high.
@@ -1463,7 +1283,7 @@ namespace Jurassic.Library
                 if (elementValue != null)
                 {
                     // Call the callback function.
-                    accumulatedValue = callbackFunction.CallLateBound(Undefined.Value, accumulatedValue, elementValue, i, thisObj);
+                    accumulatedValue = callbackFunction.CallLateBound(null, accumulatedValue, elementValue, i, thisObj);
                 }
             }
 
@@ -1483,19 +1303,15 @@ namespace Jurassic.Library
         /// <param name="initialValue"> The initial accumulated value. </param>
         /// <returns> The accumulated value returned from the last invocation of the callback
         /// function. </returns>
-        [JSFunction(Name = "reduceRight", Flags = JSFunctionFlags.HasThisObject, Length = 1)]
+        [JSFunction(Name = "reduceRight", Flags = FunctionBinderFlags.HasThisObject)]
         public static object ReduceRight(ObjectInstance thisObj, FunctionInstance callbackFunction, object initialValue = null)
         {
-            // callbackFunction must be a valid function.
-            if (callbackFunction == null)
-                throw new JavaScriptException(thisObj.Engine, "TypeError", "Invalid callback function");
-
             // Get the length of the array.
             uint arrayLength = GetLength(thisObj);
 
             // This method only supports arrays of length up to 2^31-1.
             if (arrayLength > int.MaxValue)
-                throw new JavaScriptException(thisObj.Engine, "RangeError", "The array is too long");
+                throw new JavaScriptException("RangeError", "The array is too long");
 
             // If an initial value is not provided, the initial value is the last (defined) element.
             int i = (int)arrayLength - 1;
@@ -1512,7 +1328,7 @@ namespace Jurassic.Library
                     }
                 }
                 if (accumulatedValue == null)
-                    throw new JavaScriptException(thisObj.Engine, "TypeError", "Reduce of empty array with no initial value");
+                    throw new JavaScriptException("TypeError", "Reduce of empty array with no initial value");
             }
 
             // Scan from high to to low.
@@ -1525,7 +1341,7 @@ namespace Jurassic.Library
                 if (elementValue != null)
                 {
                     // Call the callback function.
-                    accumulatedValue = callbackFunction.CallLateBound(Undefined.Value, accumulatedValue, elementValue, i, thisObj);
+                    accumulatedValue = callbackFunction.CallLateBound(null, accumulatedValue, elementValue, i, thisObj);
                 }
             }
 
@@ -1557,22 +1373,18 @@ namespace Jurassic.Library
         private static void SetLength(ObjectInstance thisObj, uint value)
         {
             if (thisObj is ArrayInstance)
-                ((ArrayInstance)thisObj).Length = value;
-            else
-                thisObj.SetPropertyValue("length", (double)value, true);
+                ((ArrayInstance)thisObj).length = value;
+            thisObj.SetPropertyValue("length", (double)value, true);
         }
 
         /// <summary>
         /// Enlarges the size of the dense array.
         /// </summary>
         /// <param name="newCapacity"> The new capacity of the array. </param>
-        /// <param name="length"> The valid number of items in the array. </param>
-        private void ResizeDenseArray(uint newCapacity, uint length)
+        private void ResizeDenseArray(uint newCapacity)
         {
-            if (newCapacity < length)
-                throw new InvalidOperationException("Cannot resize smaller than the length property.");
             var resizedArray = new object[(int)newCapacity];
-            Array.Copy(this.dense, resizedArray, (int)length);
+            Array.Copy(this.dense, resizedArray, Math.Min(this.dense.Length, (int)newCapacity));
             this.dense = resizedArray;
         }
 
@@ -1583,47 +1395,61 @@ namespace Jurassic.Library
         /// <param name="comparer"> A comparison function. </param>
         /// <param name="start"> The first index in the range. </param>
         /// <param name="end"> The last index in the range. </param>
-        private static void QuickSort(ObjectInstance array, Func<object, object, double> comparer, uint start, uint end)
+        private static void QuickSort(ObjectInstance array, Comparison<object> comparer, uint start, uint end)
         {
-            if (end - start < 30)
+            do
             {
-                // Insertion sort is faster than quick sort for small arrays.
-                InsertionSort(array, comparer, start, end);
-                return;
-            }
+                uint low = start;
+                uint high = end;
 
-            // Choose a random pivot.
-            uint pivotIndex = start + (uint)(MathObject.Random() * (end - start));
+                // Median of three.
+                uint median = low + (high - low) / 2;
+                SwapIfGreater(array, comparer, low, median);
+                SwapIfGreater(array, comparer, low, high);
+                SwapIfGreater(array, comparer, median, high);
 
-            // Get the pivot value.
-            object pivotValue = array[pivotIndex];
-
-            // Send the pivot to the back.
-            Swap(array, pivotIndex, end);
-
-            // Sweep all the low values to the front of the array and the high values to the back
-            // of the array.  This version of quicksort never gets into an infinite loop even if
-            // the comparer function is not consistent.
-            uint newPivotIndex = start;
-            for (uint i = start; i < end; i++)
-            {
-                if (comparer(array[i], pivotValue) <= 0.0)
+                object y = array[median];
+                do
                 {
-                    Swap(array, i, newPivotIndex);
-                    newPivotIndex++;
+                    while (comparer(array[low], y) < 0)
+                        low++;
+                    while (comparer(y, array[high]) < 0)
+                        high--;
+                    if (low > high)
+                        break;
+                    if (low < high)
+                    {
+                        object temp = array[low];
+                        array[low] = array[high];
+                        array[high] = temp;
+                    }
+                    low++;
+                    high--;
+                } while (low <= high);
+
+                if (high - start <= end - low)
+                {
+                    if (start < high)
+                    {
+                        if (high - start < 30)
+                            InsertionSort(array, comparer, start, high);
+                        else
+                            QuickSort(array, comparer, start, high);
+                    }
+                    start = low;
                 }
-            }
-
-            // Swap the pivot back to where it belongs.
-            Swap(array, end, newPivotIndex);
-
-            // Quick sort the array to the left of the pivot.
-            if (newPivotIndex > start)
-                QuickSort(array, comparer, start, newPivotIndex - 1);
-
-            // Quick sort the array to the right of the pivot.
-            if (newPivotIndex < end)
-                QuickSort(array, comparer, newPivotIndex + 1, end);
+                else
+                {
+                    if (low < end)
+                    {
+                        if (end - low < 30)
+                            InsertionSort(array, comparer, low, end);
+                        else
+                            QuickSort(array, comparer, low, end);
+                    }
+                    end = high;
+                }
+            } while (start < end);
         }
 
         /// <summary>
@@ -1633,7 +1459,7 @@ namespace Jurassic.Library
         /// <param name="comparer"> A comparison function. </param>
         /// <param name="start"> The first index in the range. </param>
         /// <param name="end"> The last index in the range. </param>
-        private static void InsertionSort(ObjectInstance array, Func<object, object, double> comparer, uint start, uint end)
+        private static void InsertionSort(ObjectInstance array, Comparison<object> comparer, uint start, uint end)
         {
             for (uint i = start + 1; i <= end; i++)
             {
@@ -1645,7 +1471,7 @@ namespace Jurassic.Library
                 // Normally the for loop above would continue until j < start but since we are
                 // using uint it doesn't work when start == 0.  Therefore the for loop stops one
                 // short of start then the extra loop iteration runs below.
-                if (j == start && comparer(array[j], value) > 0.0)
+                if (j == start && comparer(array[j], value) > 0)
                 {
                     array[j + 1] = array[j];
                     j--;
@@ -1656,16 +1482,23 @@ namespace Jurassic.Library
         }
 
         /// <summary>
-        /// Swaps the elements at two locations in the array.
+        /// Swaps the elements at two locations in the array, if the first element is greater than
+        /// the second element.
         /// </summary>
         /// <param name="array"> The array object. </param>
+        /// <param name="comparer"> A comparison function. </param>
         /// <param name="index1"> The location of the first element. </param>
         /// <param name="index2"> The location of the second element. </param>
-        private static void Swap(ObjectInstance array, uint index1, uint index2)
+        private static void SwapIfGreater(ObjectInstance array, Comparison<object> comparer, uint index1, uint index2)
         {
-            object temp = array[index1];
-            array[index1] = array[index2];
-            array[index2] = temp;
+            if (index1 == index2)
+                return;
+            if (comparer(array[index1], array[index2]) > 0)
+            {
+                object obj2 = array[index1];
+                array[index1] = array[index2];
+                array[index2] = obj2;
+            }
         }
     }
 }

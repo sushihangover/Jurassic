@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// The prototype for the Date object.
     /// </summary>
-    [Serializable]
     public class DateInstance : ObjectInstance
     {
         /// <summary>
@@ -39,7 +39,7 @@ namespace Jurassic.Library
         /// <param name="prototype"> The next object in the prototype chain. </param>
         /// <param name="value"> The number of milliseconds since January 1, 1970, 00:00:00 UTC. </param>
         public DateInstance(ObjectInstance prototype, double value)
-            : this(prototype, ToDateTime(value >= 0 ? Math.Floor(value) : Math.Ceiling(value)))
+            : this(prototype, ToDateTime(value))
         {
         }
 
@@ -138,7 +138,7 @@ namespace Jurassic.Library
         {
             if (typeHint == PrimitiveTypeHint.None)
                 return base.GetPrimitiveValue(PrimitiveTypeHint.String);
-            return base.GetPrimitiveValue(typeHint);
+            return base.GetPrimitiveValue(PrimitiveTypeHint.Number);
         }
         
 
@@ -808,7 +808,7 @@ namespace Jurassic.Library
         public string ToISOString()
         {
             if (this.value == InvalidDate)
-                throw new JavaScriptException(this.Engine, "RangeError", "The date is invalid");
+                throw new JavaScriptException("RangeError", "The date is invalid");
             return this.value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.DateTimeFormatInfo.InvariantInfo);
         }
 
@@ -817,7 +817,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="key"> Unused. </param>
         /// <returns> The date as a serializable string. </returns>
-        [JSFunction(Name = "toJSON", Flags = JSFunctionFlags.HasThisObject)]
+        [JSFunction(Name = "toJSON", Flags = FunctionBinderFlags.HasThisObject)]
         public static object ToJSON(ObjectInstance thisObject, string key)
         {
             var number = TypeConverter.ToPrimitive(thisObject, PrimitiveTypeHint.Number);
@@ -1196,9 +1196,9 @@ namespace Jurassic.Library
                 zoneName = timeZone.StandardName;
 
             if (hhmm < 0)
-                return string.Format("GMT{0:d4} ({1})", hhmm, zoneName);
+                return string.Format("GMT{0} ({1})", hhmm, zoneName);
             else
-                return string.Format("GMT+{0:d4} ({1})", hhmm, zoneName);
+                return string.Format("GMT+{0} ({1})", hhmm, zoneName);
         }
 
     }

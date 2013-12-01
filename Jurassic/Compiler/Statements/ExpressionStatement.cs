@@ -10,21 +10,16 @@ namespace Jurassic.Compiler
     internal class ExpressionStatement : Statement
     {
         /// <summary>
-        /// Creates a new ExpressionStatement instance.  By default, this expression does not
-        /// contribute to the result of an eval().
+        /// Creates a new ExpressionStatement instance.
         /// </summary>
         /// <param name="expression"> The underlying expression. </param>
         public ExpressionStatement(Expression expression)
-            : base(null)
+            : this(null, expression)
         {
-            if (expression == null)
-                throw new ArgumentNullException("expression");
-            this.Expression = expression;
         }
 
         /// <summary>
-        /// Creates a new ExpressionStatement instance.  By default, this expression does
-        /// contribute to the result of an eval().
+        /// Creates a new ExpressionStatement instance.
         /// </summary>
         /// <param name="labels"> The labels that are associated with this statement. </param>
         /// <param name="expression"> The underlying expression. </param>
@@ -34,7 +29,6 @@ namespace Jurassic.Compiler
             if (expression == null)
                 throw new ArgumentNullException("expression");
             this.Expression = expression;
-            this.ContributesToEvalResult = true;
         }
 
         /// <summary>
@@ -62,12 +56,8 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals();
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
-
             if (this.ContributesToEvalResult == true && optimizationInfo.EvalResult != null)
             {
                 // Emit the expression.
@@ -83,17 +73,6 @@ namespace Jurassic.Compiler
                 this.Expression.GenerateCode(generator, optimizationInfo);
                 generator.Pop();
             }
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
-        }
-
-        /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
-        /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
-        {
-            get { yield return this.Expression; }
         }
 
         /// <summary>

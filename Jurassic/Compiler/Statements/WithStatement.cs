@@ -41,11 +41,11 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals();
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
+            // This statement is not allowed in strict mode.
+            if (optimizationInfo.StrictMode == true)
+                throw new JavaScriptException("SyntaxError", "The with statement is not supported in strict mode");
 
             // Create the scope.
             this.Scope.GenerateScopeCreation(generator, optimizationInfo);
@@ -53,36 +53,15 @@ namespace Jurassic.Compiler
             // Make sure the scope is reverted even if an exception is thrown.
             generator.BeginExceptionBlock();
 
-            // Setting the InsideTryCatchOrFinally flag converts BR instructions into LEAVE
-            // instructions so that the finally block is executed correctly.
-            var previousInsideTryCatchOrFinally = optimizationInfo.InsideTryCatchOrFinally;
-            optimizationInfo.InsideTryCatchOrFinally = true;
-
             // Generate code for the body statements.
             this.Body.GenerateCode(generator, optimizationInfo);
 
-            // Reset the InsideTryCatchOrFinally flag.
-            optimizationInfo.InsideTryCatchOrFinally = previousInsideTryCatchOrFinally;
-
             // Revert the scope.
             generator.BeginFinallyBlock();
-            this.Scope.GenerateScopeDestruction(generator, optimizationInfo);
+            generator.LoadArgument(0);
+            generator.Call(ReflectionHelpers.Scope_ParentScope);
+            generator.StoreArgument(0);
             generator.EndExceptionBlock();
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
-        }
-
-        /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
-        /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
-        {
-            get
-            {
-                yield return this.Scope.ScopeObjectExpression;
-                yield return this.Body;
-            }
         }
 
         /// <summary>

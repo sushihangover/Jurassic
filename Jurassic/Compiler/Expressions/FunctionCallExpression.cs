@@ -34,34 +34,11 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Used to implement function calls without evaluating the left operand twice.
-        /// </summary>
-        private class TemporaryVariableExpression : Expression
-        {
-            private ILLocalVariable variable;
-
-            public TemporaryVariableExpression(ILLocalVariable variable)
-            {
-                this.variable = variable;
-            }
-
-            public override PrimitiveType ResultType
-            {
-                get { return PrimitiveType.Any; }
-            }
-
-            public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
-            {
-                generator.LoadVariable(this.variable);
-            }
-        }
-
-        /// <summary>
         /// Generates CIL for the expression.
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // Check if this is a direct call to eval().
             if (this.Target is NameExpression && ((NameExpression)this.Target).Name == "eval")
@@ -71,31 +48,8 @@ namespace Jurassic.Compiler
             }
 
             // Emit the function instance first.
-            ILLocalVariable targetBase = null;
-            if (this.Target is MemberAccessExpression)
-            {
-                // The function is a member access expression (e.g. "Math.cos()").
-
-                // Evaluate the left part of the member access expression.
-                var baseExpression = ((MemberAccessExpression)this.Target).Base;
-                baseExpression.GenerateCode(generator, optimizationInfo);
-                EmitConversion.ToAny(generator, baseExpression.ResultType);
-                targetBase = generator.CreateTemporaryVariable(typeof(object));
-                generator.StoreVariable(targetBase);
-
-                // Evaluate the right part of the member access expression.
-                var memberAccessExpression = new MemberAccessExpression(((MemberAccessExpression)this.Target).Operator);
-                memberAccessExpression.Push(new TemporaryVariableExpression(targetBase));
-                memberAccessExpression.Push(((MemberAccessExpression)this.Target).GetOperand(1));
-                memberAccessExpression.GenerateCode(generator, optimizationInfo);
-                EmitConversion.ToAny(generator, this.Target.ResultType);
-            }
-            else
-            {
-                // Something else (e.g. "eval()").
-                this.Target.GenerateCode(generator, optimizationInfo);
-                EmitConversion.ToAny(generator, this.Target.ResultType);
-            }
+            this.Target.GenerateCode(generator, optimizationInfo);
+            EmitConversion.ToAny(generator, this.Target.ResultType);
 
             // Check the object really is a function - if not, throw an exception.
             generator.IsInstance(typeof(Library.FunctionInstance));
@@ -104,9 +58,22 @@ namespace Jurassic.Compiler
             generator.BranchIfNotNull(endOfTypeCheck);
 
             // Throw an nicely formatted exception.
-            generator.Pop();
-            EmitHelpers.EmitThrow(generator, "TypeError", string.Format("'{0}' is not a function", this.Target.ToString()));
+            var targetValue = generator.CreateTemporaryVariable(typeof(object));
+            generator.StoreVariable(targetValue);
+            generator.LoadString("TypeError");
+            generator.LoadString("Method calls require a function, found a '{0}' instead");
+            generator.LoadInt32(1);
+            generator.NewArray(typeof(object));
+            generator.Duplicate();
+            generator.LoadInt32(0);
+            generator.LoadVariable(targetValue);
+            generator.Call(ReflectionHelpers.TypeUtilities_TypeOf);
+            generator.StoreArrayElement(typeof(object));
+            generator.Call(ReflectionHelpers.String_Format);
+            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor2);
+            generator.Throw();
             generator.DefineLabelPosition(endOfTypeCheck);
+            generator.ReleaseTemporaryVariable(targetValue);
 
             // Generate code to produce the "this" value.  There are three cases.
             if (this.Target is NameExpression)
@@ -119,10 +86,9 @@ namespace Jurassic.Compiler
             {
                 // 2. The function is a member access expression (e.g. "Math.cos()").
                 //    In this case this = Math.
-                //var baseExpression = ((MemberAccessExpression)this.Target).Base;
-                //baseExpression.GenerateCode(generator, optimizationInfo);
-                //EmitConversion.ToAny(generator, baseExpression.ResultType);
-                generator.LoadVariable(targetBase);
+                var baseExpression = ((MemberAccessExpression)this.Target).Base;
+                baseExpression.GenerateCode(generator, optimizationInfo);
+                EmitConversion.ToAny(generator, baseExpression.ResultType);
             }
             else
             {
@@ -136,10 +102,6 @@ namespace Jurassic.Compiler
 
             // Call FunctionInstance.CallLateBound(thisValue, argumentValues)
             generator.Call(ReflectionHelpers.FunctionInstance_CallLateBound);
-
-            // Allow reuse of the temporary variable.
-            if (targetBase != null)
-                generator.ReleaseTemporaryVariable(targetBase);
         }
 
         /// <summary>
@@ -161,7 +123,7 @@ namespace Jurassic.Compiler
             {
                 // One or more arguments.
                 IList<Expression> arguments;
-                var argumentsOperand = this.GetRawOperand(1);
+                var argumentsOperand = this.GetOperand(1);
                 if (argumentsOperand is ListExpression)
                 {
                     // Multiple parameters were passed to the function.
@@ -194,9 +156,6 @@ namespace Jurassic.Compiler
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
         private void GenerateEval(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // engine
-            EmitHelpers.LoadScriptEngine(generator);
-
             // code
             if (this.OperandCount < 2)
             {
@@ -209,18 +168,19 @@ namespace Jurassic.Compiler
                 GenerateArgumentsArray(generator, optimizationInfo);
                 generator.LoadInt32(0);
                 generator.LoadArrayElement(typeof(object));
+                EmitConversion.ToString(generator, PrimitiveType.Any);
             }
 
             // scope
-            EmitHelpers.LoadScope(generator);
+            generator.LoadArgument(0);
 
             // thisObject
-            EmitHelpers.LoadThis(generator);
+            generator.LoadArgument(1);
 
             // strictMode
             generator.LoadBoolean(optimizationInfo.StrictMode);
 
-            // Call Global.Eval(engine, code, scope, thisValue, strictMode)
+            // Call Global.Eval(code, scope, thisValue, strictMode)
             generator.Call(ReflectionHelpers.Global_Eval);
         }
     }

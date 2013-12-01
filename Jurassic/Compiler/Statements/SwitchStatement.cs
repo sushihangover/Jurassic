@@ -44,10 +44,6 @@ namespace Jurassic.Compiler
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
         public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals() { NonDefaultBreakStatementBehavior = true };
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
-
             // We need a label for each case clause and one for the default case.
             var jumpTargets = new ILLabel[this.CaseClauses.Count];
             int defaultIndex = -1;
@@ -99,7 +95,7 @@ namespace Jurassic.Compiler
                 generator.DefineLabelPosition(jumpTargets[i]);
 
                 // Set up the information needed by the break statement.
-                optimizationInfo.PushBreakOrContinueInfo(this.Labels, endOfSwitch, null, labelledOnly: false);
+                optimizationInfo.PushBreakOrContinueInfo(this.Labels, endOfSwitch, null, false);
 
                 // Emit the case clause statements.
                 foreach (var statement in this.CaseClauses[i].BodyStatements)
@@ -114,27 +110,6 @@ namespace Jurassic.Compiler
 
             // Release the switch value variable for use elsewhere.
             generator.ReleaseTemporaryVariable(switchValue);
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
-        }
-
-        /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
-        /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
-        {
-            get
-            {
-                yield return this.Value;
-                foreach (var clause in this.CaseClauses)
-                {
-                    if (clause.Value != null)
-                        yield return clause.Value;
-                    foreach (var statement in clause.BodyStatements)
-                        yield return statement;
-                }
-            }
         }
 
         /// <summary>

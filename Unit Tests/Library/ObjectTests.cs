@@ -51,10 +51,6 @@ namespace UnitTests
             // constructor
             Assert.AreEqual(true, TestUtils.Evaluate("Object.prototype.constructor === Object"));
             Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("Object.prototype", "constructor"));
-
-            // Functions are writable and configurable.
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("Object", "keys"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("Object.prototype", "hasOwnProperty"));
         }
 
 
@@ -279,8 +275,8 @@ namespace UnitTests
             Assert.AreEqual(true, TestUtils.Evaluate("delete x.a"));
             Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("x.a"));
 
-            // An empty property descriptor defines a default property (if the property doesn't already exist).
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {}; Object.defineProperty(x, 'a', {}) === x"));
+            // Not all the properties need to be specified.
+            Assert.AreEqual(true, TestUtils.Evaluate("var x = {a: 5}; Object.defineProperty(x, 'a', {}) === x"));
             Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("x.a"));
             Assert.AreEqual(true, TestUtils.Evaluate("x.hasOwnProperty('a')"));
             Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').value"));
@@ -289,34 +285,6 @@ namespace UnitTests
             Assert.AreEqual(false, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').enumerable"));
             Assert.AreEqual(false, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').writable"));
             Assert.AreEqual(false, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').configurable"));
-
-            // An empty property descriptor does nothing if the property already exists.
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {a: 5}; Object.defineProperty(x, 'a', {}) === x"));
-            Assert.AreEqual(5, TestUtils.Evaluate("x.a"));
-            Assert.AreEqual(true, TestUtils.Evaluate("x.hasOwnProperty('a')"));
-            Assert.AreEqual(5, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').value"));
-            Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').get"));
-            Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').set"));
-            Assert.AreEqual(true, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').enumerable"));
-            Assert.AreEqual(true, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').writable"));
-            Assert.AreEqual(true, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').configurable"));
-
-            // A property descriptor without a value does not change the existing value.
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {a: 5}; Object.defineProperty(x, 'a', {writable: false}) === x"));
-            Assert.AreEqual(5, TestUtils.Evaluate("x.a"));
-            Assert.AreEqual(true, TestUtils.Evaluate("x.hasOwnProperty('a')"));
-            Assert.AreEqual(5, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').value"));
-            Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').get"));
-            Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').set"));
-            Assert.AreEqual(true, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').enumerable"));
-            Assert.AreEqual(false, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').writable"));
-            Assert.AreEqual(true, TestUtils.Evaluate("Object.getOwnPropertyDescriptor(x, 'a').configurable"));
-
-            // get and set can be undefined.
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {}; Object.defineProperty(x, 'a', {get: function() { return 1; }, set: undefined, configurable: true}) === x"));
-            Assert.AreEqual(1, TestUtils.Evaluate("x.a"));
-            Assert.AreEqual(true, TestUtils.Evaluate("Object.defineProperty(x, 'a', {get: undefined, set: undefined}) === x"));
-            Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("x.a"));
 
             // Non-extensible objects cannot have properties added.
             Assert.AreEqual(true, TestUtils.Evaluate("var x = {}; Object.preventExtensions(x) === x"));
@@ -329,8 +297,6 @@ namespace UnitTests
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty(x, 'a', {value: 10, enumerable: false, writable: true, configurable: false})"));
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty(x, 'a', {value: 10, enumerable: true, writable: false, configurable: false})"));
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty(x, 'a', {value: 10, enumerable: true, writable: true, configurable: true})"));
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {}; var f = function() { return 1; }; Object.defineProperty(x, 'a', {get: f}); Object.defineProperty(x, 'a', {get: f}) === x"));
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {}; Object.defineProperty(x, 'a', {get: function() { return 1; }}); Object.defineProperty(x, 'a', {set: undefined}) === x"));
 
             // Value is not allowed when specifying an accessor property.
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("var x = {}; Object.defineProperty(x, 'a', {get: function() { return 7 }, enumerable: true, configurable: true, value: 5})"));
@@ -358,11 +324,6 @@ namespace UnitTests
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty(true, {})"));
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty(5, {})"));
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty('test', {})"));
-
-            // Property descriptors must be objects.
-            Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty({}, 'a', 5)"));
-            Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty({}, 'a', undefined)"));
-            Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperty({}, 'a', null)"));
         }
 
         [TestMethod]
@@ -383,11 +344,6 @@ namespace UnitTests
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperties(true, {})"));
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperties(5, {})"));
             Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperties('test', {})"));
-
-            // Property descriptors must be objects.
-            Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperties({}, { a: 1 })"));
-            Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperties({}, { a: undefined })"));
-            Assert.AreEqual("TypeError", TestUtils.EvaluateExceptionType("Object.defineProperties({}, { a: null })"));
         }
 
         [TestMethod]
@@ -527,7 +483,6 @@ namespace UnitTests
             Assert.AreEqual("a", TestUtils.Evaluate("Object.keys({a: 1}).toString()"));
             Assert.AreEqual("0,1,2", TestUtils.Evaluate("Object.keys([1, 2, 3]).toString()"));
             Assert.AreEqual("0,1,2", TestUtils.Evaluate("Object.keys(new String('sdf')).toString()"));
-            Assert.AreEqual("0,1,2", TestUtils.Evaluate("function foo() { return Object.keys(arguments) } foo(1, 2, 3).toString()"));
 
             // length
             Assert.AreEqual(1, TestUtils.Evaluate("Object.keys.length"));

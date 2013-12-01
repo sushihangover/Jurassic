@@ -8,23 +8,33 @@ namespace Jurassic.Compiler
     /// </summary>
     internal class ReflectionEmitILGenerator : ILGenerator
     {
+        private System.Reflection.Emit.MethodBuilder method;
         private System.Reflection.Emit.ILGenerator generator;
 
         /// <summary>
         /// Creates a new ReflectionEmitILGenerator instance.
         /// </summary>
-        /// <param name="generator"> The ILGenerator that is used to output the IL. </param>
-        public ReflectionEmitILGenerator(System.Reflection.Emit.ILGenerator generator)
+        /// <param name="method"> The MethodBuilder for the method that is being constructed. </param>
+        public ReflectionEmitILGenerator(System.Reflection.Emit.MethodBuilder method)
         {
-            if (generator == null)
-                throw new ArgumentNullException("generator");
-            this.generator = generator;
+            if (method == null)
+                throw new ArgumentNullException("method");
+            this.method = method;
+            this.generator = method.GetILGenerator();
         }
 
 
 
         //     BUFFER MANAGEMENT
         //_________________________________________________________________________________________
+
+        /// <summary>
+        /// Gets the size of the method, in bytes.
+        /// </summary>
+        public override int CodeLength
+        {
+            get { return this.generator.ILOffset; }
+        }
 
         /// <summary>
         /// Emits a return statement and finalizes the generated code.  Do not emit any more
@@ -150,20 +160,6 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Branches to the given label if the first value on the stack is greater than the second
-        /// value on the stack.  If the operands are integers then they are treated as if they are
-        /// unsigned.  If the operands are floating point numbers then a NaN value will trigger a
-        /// branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfGreaterThanUnsigned(ILLabel label)
-        {
-            if (label as ReflectionEmitILLabel == null)
-                throw new ArgumentNullException("label");
-            this.generator.Emit(OpCodes.Bgt_Un, ((ReflectionEmitILLabel)label).UnderlyingLabel);
-        }
-
-        /// <summary>
         /// Branches to the given label if the first value on the stack is greater than or equal to
         /// the second value on the stack.
         /// </summary>
@@ -173,20 +169,6 @@ namespace Jurassic.Compiler
             if (label as ReflectionEmitILLabel == null)
                 throw new ArgumentNullException("label");
             this.generator.Emit(OpCodes.Bge, ((ReflectionEmitILLabel)label).UnderlyingLabel);
-        }
-
-        /// <summary>
-        /// Branches to the given label if the first value on the stack is greater than or equal to
-        /// the second value on the stack.  If the operands are integers then they are treated as
-        /// if they are unsigned.  If the operands are floating point numbers then a NaN value will
-        /// trigger a branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfGreaterThanOrEqualUnsigned(ILLabel label)
-        {
-            if (label as ReflectionEmitILLabel == null)
-                throw new ArgumentNullException("label");
-            this.generator.Emit(OpCodes.Bge_Un, ((ReflectionEmitILLabel)label).UnderlyingLabel);
         }
 
         /// <summary>
@@ -202,20 +184,6 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Branches to the given label if the first value on the stack is less than the second
-        /// value on the stack.  If the operands are integers then they are treated as if they are
-        /// unsigned.  If the operands are floating point numbers then a NaN value will trigger a
-        /// branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfLessThanUnsigned(ILLabel label)
-        {
-            if (label as ReflectionEmitILLabel == null)
-                throw new ArgumentNullException("label");
-            this.generator.Emit(OpCodes.Blt_Un, ((ReflectionEmitILLabel)label).UnderlyingLabel);
-        }
-
-        /// <summary>
         /// Branches to the given label if the first value on the stack is less than or equal to
         /// the second value on the stack.
         /// </summary>
@@ -228,42 +196,12 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Branches to the given label if the first value on the stack is less than or equal to
-        /// the second value on the stack.  If the operands are integers then they are treated as
-        /// if they are unsigned.  If the operands are floating point numbers then a NaN value will
-        /// trigger a branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfLessThanOrEqualUnsigned(ILLabel label)
-        {
-            if (label as ReflectionEmitILLabel == null)
-                throw new ArgumentNullException("label");
-            this.generator.Emit(OpCodes.Ble_Un, ((ReflectionEmitILLabel)label).UnderlyingLabel);
-        }
-
-        /// <summary>
         /// Returns from the current method.  A value is popped from the stack and used as the
         /// return value.
         /// </summary>
         public override void Return()
         {
             this.generator.Emit(OpCodes.Ret);
-        }
-
-        /// <summary>
-        /// Creates a jump table.  A value is popped from the stack - this value indicates the
-        /// index of the label in the <paramref name="labels"/> array to jump to.
-        /// </summary>
-        /// <param name="labels"> A array of labels. </param>
-        public override void Switch(ILLabel[] labels)
-        {
-            if (labels == null)
-                throw new ArgumentNullException("labels");
-
-            var reflectionLabels = new System.Reflection.Emit.Label[labels.Length];
-            for (int i = 0; i < labels.Length; i++)
-                reflectionLabels[i] = ((ReflectionEmitILLabel)labels[i]).UnderlyingLabel;
-            this.generator.Emit(OpCodes.Switch, reflectionLabels);
         }
 
 
@@ -280,8 +218,8 @@ namespace Jurassic.Compiler
         public override ILLocalVariable DeclareVariable(Type type, string name = null)
         {
             var result = this.generator.DeclareLocal(type);
-            //if (name != null)
-            //    result.SetLocalSymInfo(name);
+            if (name != null)
+                result.SetLocalSymInfo(name);
             return new ReflectionEmitILLocalVariable(result);
         }
 
@@ -419,19 +357,10 @@ namespace Jurassic.Compiler
                 }
                 
             }
-            else if (value >= -128 && value < 128)
+            else if (value >= 0 && value < 256)
                 this.generator.Emit(OpCodes.Ldc_I4_S, (byte)value);
             else
                 this.generator.Emit(OpCodes.Ldc_I4, value);
-        }
-
-        /// <summary>
-        /// Pushes a 64-bit constant value onto the stack.
-        /// </summary>
-        /// <param name="value"> The 64-bit integer to push onto the stack. </param>
-        public override void LoadInt64(long value)
-        {
-            this.generator.Emit(OpCodes.Ldc_I8, value);
         }
 
         /// <summary>
@@ -462,7 +391,7 @@ namespace Jurassic.Compiler
         /// is equal to the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public override void CompareEqual()
+        public override void Equal()
         {
             this.generator.Emit(OpCodes.Ceq);
         }
@@ -472,7 +401,7 @@ namespace Jurassic.Compiler
         /// is greater than the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public override void CompareGreaterThan()
+        public override void GreaterThan()
         {
             this.generator.Emit(OpCodes.Cgt);
         }
@@ -482,7 +411,7 @@ namespace Jurassic.Compiler
         /// is greater than the second, or <c>0</c> otherwise.  Produces <c>1</c> if one or both
         /// of the arguments are <c>NaN</c>.  Integers are considered to be unsigned.
         /// </summary>
-        public override void CompareGreaterThanUnsigned()
+        public override void GreaterThanUnsigned()
         {
             this.generator.Emit(OpCodes.Cgt_Un);
         }
@@ -492,7 +421,7 @@ namespace Jurassic.Compiler
         /// is less than the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public override void CompareLessThan()
+        public override void LessThan()
         {
             this.generator.Emit(OpCodes.Clt);
         }
@@ -502,7 +431,7 @@ namespace Jurassic.Compiler
         /// is less than the second, or <c>0</c> otherwise.  Produces <c>1</c> if one or both
         /// of the arguments are <c>NaN</c>.  Integers are considered to be unsigned.
         /// </summary>
-        public override void CompareLessThanUnsigned()
+        public override void LessThanUnsigned()
         {
             this.generator.Emit(OpCodes.Clt_Un);
         }
@@ -643,20 +572,6 @@ namespace Jurassic.Compiler
             if (type.IsValueType == false)
                 throw new ArgumentException("The type to box must be a value type.", "type");
             this.generator.Emit(OpCodes.Box, type);
-        }
-
-        /// <summary>
-        /// Pops an object reference (representing a boxed value) from the stack, extracts the value,
-        /// then pushes the value onto the stack.
-        /// </summary>
-        /// <param name="type"> The type of the boxed value.  This should be a value type. </param>
-        public override void Unbox(Type type)
-        {
-            if (type == null)
-                throw new ArgumentNullException("type");
-            if (type.IsValueType == false)
-                throw new ArgumentException("The type of the boxed value must be a value type.", "type");
-            this.generator.Emit(OpCodes.Unbox_Any, type);
         }
 
         /// <summary>
@@ -825,6 +740,36 @@ namespace Jurassic.Compiler
             this.generator.Emit(OpCodes.Ldvirtftn, method);
         }
 
+        /// <summary>
+        /// Pops the method arguments off the stack, pops a method pointer off the stack, calls the
+        /// unmanaged method indicated by the method pointer, then pushes the result to the stack (if
+        /// there was one).
+        /// </summary>
+        /// <param name="unmanagedCallingConvention"> The unmanaged calling convention. </param>
+        /// <param name="returnType"> The return type for the method to be called. </param>
+        /// <param name="parameterTypes"> The types for each parameter accepted by the method
+        /// (including the "this" parameter, if present). </param>
+        public override void CallIndirect(System.Runtime.InteropServices.CallingConvention unmanagedCallingConvention, Type returnType, Type[] parameterTypes)
+        {
+            this.generator.EmitCalli(OpCodes.Calli, unmanagedCallingConvention, returnType, parameterTypes);
+        }
+
+        /// <summary>
+        /// Pops the method arguments off the stack, pops a method pointer off the stack, calls the
+        /// managed method indicated by the method pointer, then pushes the result to the stack
+        /// (if there was one).
+        /// </summary>
+        /// <param name="callingConvention"> The managed calling convention. </param>
+        /// <param name="returnType"> The return type for the method to be called. </param>
+        /// <param name="parameterTypes"> The types for each parameter accepted by the method
+        /// (including the "this" parameter, if present). </param>
+        /// <param name="optionalParameterTypes"> The types for each optional parameter (only
+        /// applies to varargs calls). </param>
+        public override void CallIndirect(System.Reflection.CallingConventions callingConvention, Type returnType, Type[] parameterTypes, Type[] optionalParameterTypes = null)
+        {
+            this.generator.EmitCalli(OpCodes.Calli, callingConvention, returnType, parameterTypes, optionalParameterTypes);
+        }
+
 
 
         //     ARRAYS
@@ -846,37 +791,7 @@ namespace Jurassic.Compiler
         /// <param name="type"> The element type. </param>
         public override void LoadArrayElement(Type type)
         {
-            switch (Type.GetTypeCode(type))
-            {
-                case TypeCode.Byte:
-                case TypeCode.SByte:
-                    this.generator.Emit(OpCodes.Ldelem_I1);
-                    break;
-                case TypeCode.UInt16:
-                case TypeCode.Int16:
-                    this.generator.Emit(OpCodes.Ldelem_I2);
-                    break;
-                case TypeCode.UInt32:
-                case TypeCode.Int32:
-                    this.generator.Emit(OpCodes.Ldelem_I4);
-                    break;
-                case TypeCode.UInt64:
-                case TypeCode.Int64:
-                    this.generator.Emit(OpCodes.Ldelem_I8);
-                    break;
-                case TypeCode.Single:
-                    this.generator.Emit(OpCodes.Ldelem_R4);
-                    break;
-                case TypeCode.Double:
-                    this.generator.Emit(OpCodes.Ldelem_R8);
-                    break;
-                default:
-                    if (type.IsClass == true)
-                        this.generator.Emit(OpCodes.Ldelem_Ref);
-                    else
-                        this.generator.Emit(OpCodes.Ldelem, type);
-                    break;
-            }
+            this.generator.Emit(OpCodes.Ldelem, type);
         }
 
         /// <summary>
@@ -885,37 +800,7 @@ namespace Jurassic.Compiler
         /// <param name="type"> The element type. </param>
         public override void StoreArrayElement(Type type)
         {
-            switch (Type.GetTypeCode(type))
-            {
-                case TypeCode.Byte:
-                case TypeCode.SByte:
-                    this.generator.Emit(OpCodes.Stelem_I1);
-                    break;
-                case TypeCode.UInt16:
-                case TypeCode.Int16:
-                    this.generator.Emit(OpCodes.Stelem_I2);
-                    break;
-                case TypeCode.UInt32:
-                case TypeCode.Int32:
-                    this.generator.Emit(OpCodes.Stelem_I4);
-                    break;
-                case TypeCode.UInt64:
-                case TypeCode.Int64:
-                    this.generator.Emit(OpCodes.Stelem_I8);
-                    break;
-                case TypeCode.Single:
-                    this.generator.Emit(OpCodes.Stelem_R4);
-                    break;
-                case TypeCode.Double:
-                    this.generator.Emit(OpCodes.Stelem_R8);
-                    break;
-                default:
-                    if (type.IsClass == true)
-                        this.generator.Emit(OpCodes.Stelem_Ref);
-                    else
-                        this.generator.Emit(OpCodes.Stelem, type);
-                    break;
-            }
+            this.generator.Emit(OpCodes.Stelem, type);
         }
 
         /// <summary>
@@ -949,7 +834,7 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Ends a try-catch-finally block.  BeginExceptionBlock() must have already been called.
+        /// Ends a try-catch-finally block.
         /// </summary>
         public override void EndExceptionBlock()
         {
@@ -957,7 +842,7 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Begins a catch block.  BeginExceptionBlock() must have already been called.
+        /// Begins a catch block.  BeginTryCatchFinallyBlock() must have already been called.
         /// </summary>
         /// <param name="exceptionType"> The type of exception to handle. </param>
         public override void BeginCatchBlock(Type exceptionType)
@@ -966,7 +851,7 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Begins a finally block.  BeginExceptionBlock() must have already been called.
+        /// Begins a finally block.  BeginTryCatchFinallyBlock() must have already been called.
         /// </summary>
         public override void BeginFinallyBlock()
         {
@@ -974,7 +859,7 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Begins a filter block.  BeginExceptionBlock() must have already been called.
+        /// Begins a filter block.  BeginTryCatchFinallyBlock() must have already been called.
         /// </summary>
         public override void BeginFilterBlock()
         {
@@ -982,7 +867,7 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Begins a fault block.  BeginExceptionBlock() must have already been called.
+        /// Begins a fault block.  BeginTryCatchFinallyBlock() must have already been called.
         /// </summary>
         public override void BeginFaultBlock()
         {
@@ -1023,7 +908,7 @@ namespace Jurassic.Compiler
 
 
 
-        //     DEBUGGING SUPPORT
+        //     MISC
         //_________________________________________________________________________________________
 
         /// <summary>
@@ -1032,32 +917,6 @@ namespace Jurassic.Compiler
         public override void Breakpoint()
         {
             this.generator.Emit(OpCodes.Break);
-        }
-
-        /// <summary>
-        /// Marks a sequence point in the Microsoft intermediate language (MSIL) stream.
-        /// </summary>
-        /// <param name="document"> The document for which the sequence point is being defined. </param>
-        /// <param name="startLine"> The line where the sequence point begins. </param>
-        /// <param name="startColumn"> The column in the line where the sequence point begins. </param>
-        /// <param name="endLine"> The line where the sequence point ends. </param>
-        /// <param name="endColumn"> The column in the line where the sequence point ends. </param>
-        public override void MarkSequencePoint(System.Diagnostics.SymbolStore.ISymbolDocumentWriter document, int startLine, int startColumn, int endLine, int endColumn)
-        {
-            this.generator.MarkSequencePoint(document, startLine, startColumn, endLine, endColumn);
-        }
-
-
-
-        //     MISC
-        //_________________________________________________________________________________________
-
-        /// <summary>
-        /// Does nothing.
-        /// </summary>
-        public override void NoOperation()
-        {
-            this.generator.Emit(OpCodes.Nop);
         }
     }
 

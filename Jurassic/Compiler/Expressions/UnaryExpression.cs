@@ -63,7 +63,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // Special-case the delete operator.
             if (this.OperatorType == OperatorType.Delete)
@@ -122,7 +122,7 @@ namespace Jurassic.Compiler
 
                 case OperatorType.LogicalNot:
                     generator.LoadBoolean(false);
-                    generator.CompareEqual();
+                    generator.Equal();
                     break;
 
                 case OperatorType.Void:
@@ -177,16 +177,10 @@ namespace Jurassic.Compiler
             // Attempting to delete something that isn't a reference returns true but otherwise does nothing.
             if ((this.Operand is IReferenceExpression) == false)
             {
-                // Make sure the expression is evaluated.
-                this.Operand.GenerateCode(generator, optimizationInfo);
-
-                // Discard the result and return true.
-                generator.Pop();
-                generator.LoadBoolean(true);
+                //if (optimizationInfo.SuppressReturnValue == false)
+                    generator.LoadBoolean(true);
                 return;
             }
-
-            // The operand is a variable or property reference.
             ((IReferenceExpression)this.Operand).GenerateDelete(generator, optimizationInfo);
         }
     }

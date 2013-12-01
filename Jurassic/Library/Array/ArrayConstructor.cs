@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents the built-in javascript Array object.
     /// </summary>
-    [Serializable]
     public class ArrayConstructor : ClrFunction
     {
 
@@ -18,7 +18,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="prototype"> The next object in the prototype chain. </param>
         internal ArrayConstructor(ObjectInstance prototype)
-            : base(prototype, "Array", new ArrayInstance(prototype.Engine.Object.InstancePrototype, 0, 0))
+            : base(prototype, "Array", new ArrayInstance(GlobalObject.Object.InstancePrototype, 0, 0))
         {
         }
 
@@ -59,7 +59,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="elements"> The initial elements of the new array. </param>
         [JSCallFunction]
-        public ArrayInstance Call(params object[] elements)
+        private ArrayInstance Call(params object[] elements)
         {
             return Construct(elements);
         }
@@ -70,32 +70,26 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="elements"> The initial elements of the new array. </param>
         [JSConstructorFunction]
-        public ArrayInstance Construct(params object[] elements)
+        private ArrayInstance Construct(params object[] elements)
         {
             if (elements.Length == 1)
             {
                 if (elements[0] is double)
                 {
                     double length = (double)elements[0];
+                    if (length < 0 || length > uint.MaxValue)
+                        throw new JavaScriptException("RangeError", "Invalid array length");
                     uint length32 = TypeConverter.ToUint32(length);
-                    if (length != (double)length32)
-                        throw new JavaScriptException(this.Engine, "RangeError", "Invalid array length");
                     return new ArrayInstance(this.InstancePrototype, length32, length32);
                 }
                 else if (elements[0] is int)
                 {
                     int length = (int)elements[0];
                     if (length < 0)
-                        throw new JavaScriptException(this.Engine, "RangeError", "Invalid array length");
+                        throw new JavaScriptException("RangeError", "Invalid array length");
                     return new ArrayInstance(this.InstancePrototype, (uint)length, (uint)length);
                 }
             }
-
-            // Transform any nulls into undefined.
-            for (int i = 0; i < elements.Length; i++)
-                if (elements[i] == null)
-                    elements[i] = Undefined.Value;
-
             return New(elements);
         }
 

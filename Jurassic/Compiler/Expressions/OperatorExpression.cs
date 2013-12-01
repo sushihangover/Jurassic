@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 
 namespace Jurassic.Compiler
 {
@@ -101,7 +100,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="index"> The index of the operand to retrieve. </param>
         /// <returns> The operand with the given index. </returns>
-        public Expression GetRawOperand(int index)
+        protected Expression GetRawOperand(int index)
         {
             return this.operands[index];
         }
@@ -111,7 +110,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="index"> The index of the operand to retrieve. </param>
         /// <returns> The operand with the given index. </returns>
-        public Expression GetOperand(int index)
+        protected Expression GetOperand(int index)
         {
             if (index < 0 || index >= this.OperandCount)
                 throw new ArgumentOutOfRangeException("index");
@@ -200,16 +199,40 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
+        /// Gets a value that indicates whether this 
         /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
+        public void CheckValid()
         {
-            get
-            {
-                for (int i = 0; i < this.OperandCount; i++)
-                    yield return this.operands[i];
-            }
+            if (this.Operator.IsValidNumberOfOperands(this.OperandCount) == false)
+                throw new JavaScriptException("SyntaxError", "Wrong number of operands", 1, "");
+            if (this.Operator.SecondaryToken != null && this.SecondTokenEncountered == false)
+                throw new JavaScriptException("SyntaxError", string.Format("Missing closing token '{0}'", this.Operator.SecondaryToken.Text), 1, "");
         }
+
+        /// <summary>
+        /// Visits every node in the expression.
+        /// </summary>
+        /// <param name="visitor"> The visitor callback. </param>
+        public override void Visit(Action<Expression> visitor)
+        {
+            // Visit this node.
+            visitor(this);
+
+            // Visit each child.
+            for (int i = 0; i < this.OperandCount; i++)
+                this.operands[i].Visit(visitor);
+        }
+
+        ///// <summary>
+        ///// Generates CIL that evaluates the side-effects of the expression and does not generate any value.
+        ///// </summary>
+        ///// <param name="generator"> The generator to output the CIL to. </param>
+        ///// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
+        //protected void GenerateSideEffects(ILGenerator generator, OptimizationInfo optimizationInfo)
+        //{
+        //    for (int i = 0; i < this.OperandCount; i++)
+        //        this.GetOperand(i).GenerateCode(generator, optimizationInfo.AddFlags(OptimizationFlags.SuppressReturnValue));
+        //}
 
         /// <summary>
         /// Converts the expression to a string.

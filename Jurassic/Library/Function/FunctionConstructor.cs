@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents the built-in JavaScript Function object.
     /// </summary>
-    [Serializable]
     public class FunctionConstructor : ClrFunction
     {
 
@@ -57,21 +57,18 @@ namespace Jurassic.Library
             for (int i = 0; i < argumentsAndBody.Length - 1; i++)
             {
                 var splitNames = argumentsAndBody[i].Split(',');
-                if (splitNames.Length > 1 || StringInstance.Trim(splitNames[0]) != string.Empty)
+                for (int j = 0; j < splitNames.Length; j++)
                 {
-                    for (int j = 0; j < splitNames.Length; j++)
-                    {
-                        // Trim any whitespace from the start and end of the argument name.
-                        string argumentName = StringInstance.Trim(splitNames[j]);
-                        if (argumentName == string.Empty)
-                            throw new JavaScriptException(this.Engine, "SyntaxError", "Unexpected ',' in argument");
+                    // Trim any whitespace from the start and end of the argument name.
+                    string argumentName = StringInstance.Trim(splitNames[j]);
+                    if (argumentName == string.Empty)
+                        throw new JavaScriptException("SyntaxError", "Unexpected ',' in argument");
 
-                        // Check the name is valid and resolve any escape sequences.
-                        argumentName = Compiler.Lexer.ResolveIdentifier(this.Engine, argumentName);
-                        if (argumentName == null)
-                            throw new JavaScriptException(this.Engine, "SyntaxError", "Expected identifier");
-                        splitNames[j] = argumentName;
-                    }
+                    // Check the name is valid and resolve any escape sequences.
+                    argumentName = Compiler.Lexer.ResolveIdentifier(argumentName);
+                    if (argumentName == null)
+                        throw new JavaScriptException("SyntaxError", "Expected identifier");
+                    splitNames[j] = argumentName;
                 }
                 argumentNames.AddRange(splitNames);
             }

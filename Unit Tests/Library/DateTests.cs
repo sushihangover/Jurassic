@@ -26,8 +26,6 @@ namespace UnitTests
             Assert.AreEqual(100, TestUtils.Evaluate("new Date(100).valueOf()"));
             Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(NaN).valueOf()"));
             Assert.AreEqual(1, TestUtils.Evaluate("new Date(true).valueOf()"));
-            Assert.AreEqual(6, TestUtils.Evaluate("new Date(6.6).valueOf()"));
-            Assert.AreEqual(-6, TestUtils.Evaluate("new Date(-6.6).valueOf()"));
 
             // new Date(dateStr)
             Assert.AreEqual(ToJSDate(new DateTime(2010, 1, 5)), TestUtils.Evaluate("new Date('5 Jan 2010').valueOf()"));
@@ -80,34 +78,20 @@ namespace UnitTests
             {
                 // Date() returns the current date as a string - this test assumes the running time is less than 1s.
                 var str = (string)TestUtils.Evaluate("Date()");
-                var formatString = "ddd MMM dd yyyy HH:mm:ss";
-                Assert.IsTrue(str.StartsWith(DateTime.Now.ToString(formatString)) || str.StartsWith(DateTime.Now.AddSeconds(1).ToString(formatString)),
+                var formatString = "ddd MMM dd yyyy HH:mm:ss 'GMT+1200 (New Zealand Standard Time)'";
+                Assert.IsTrue(str == DateTime.Now.ToString(formatString) || str == DateTime.Now.AddSeconds(1).ToString(formatString),
                     string.Format("Expected: {0} Was: {1}", DateTime.Now.ToString(formatString), str));
 
                 // Any arguments provided are ignored.
                 str = (string)TestUtils.Evaluate("Date(2009)");
-                Assert.IsTrue(str.StartsWith(DateTime.Now.ToString("ddd MMM dd yyyy HH:mm:ss")) ||
-                    str.StartsWith(DateTime.Now.AddSeconds(1).ToString("ddd MMM dd yyyy HH:mm:ss")));
+                Assert.IsTrue(str == DateTime.Now.ToString("ddd MMM dd yyyy HH:mm:ss 'GMT+1200 (New Zealand Standard Time)'") ||
+                    str == DateTime.Now.AddSeconds(1).ToString("ddd MMM dd yyyy HH:mm:ss 'GMT+1200 (New Zealand Standard Time)'"));
             }
 
             // toString and valueOf.
             if (TestUtils.Engine != JSEngine.JScript)
                 Assert.AreEqual("function Date() { [native code] }", TestUtils.Evaluate("Date.toString()"));
             Assert.AreEqual(true, TestUtils.Evaluate("Date.valueOf() === Date"));
-
-            // Undefined dates.
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(undefined).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, undefined).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, 1, undefined).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(undefined, 1, 1).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, 1, 2, undefined).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, 1, 2, 1, undefined).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, 1, 2, 1, 1, undefined).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, 1, 2, 1, 1, 1, undefined).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(NaN).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, 1, NaN).valueOf()"));
-            Assert.AreEqual(double.NaN, TestUtils.Evaluate("new Date(2010, 1, 2, NaN).valueOf()"));
-            Assert.AreEqual(ToJSDate(new DateTime(2010, 2, 2, 1, 1, 1, 1)), TestUtils.Evaluate("new Date(2010, 1, 2, 1, 1, 1, 1, undefined).valueOf()"));
 
             // length
             Assert.AreEqual(7, TestUtils.Evaluate("Date.length"));
@@ -656,7 +640,7 @@ namespace UnitTests
         public void toString()
         {
             if (TestUtils.Engine != JSEngine.JScript)
-                Assert.AreEqual("Sat Apr 24 2010 23:59:57 " + GetTimezoneString(DateTime.Parse("24 Apr 2010 23:59:57")), TestUtils.Evaluate("new Date('24 Apr 2010 23:59:57').toString()"));
+                Assert.AreEqual("Sat Apr 24 2010 23:59:57 GMT+1200 (New Zealand Standard Time)", TestUtils.Evaluate("new Date('24 Apr 2010 23:59:57').toString()"));
             Assert.AreEqual("Invalid Date", TestUtils.Evaluate("new Date(NaN).toString()"));
             Assert.AreEqual(0, TestUtils.Evaluate("new Date().toString.length"));
         }
@@ -665,7 +649,7 @@ namespace UnitTests
         public void toTimeString()
         {
             if (TestUtils.Engine != JSEngine.JScript)
-                Assert.AreEqual("23:59:57 " + GetTimezoneString(DateTime.Parse("24 Apr 2010 23:59:57")), TestUtils.Evaluate("new Date('24 Apr 2010 23:59:57').toTimeString()"));
+                Assert.AreEqual("23:59:57 GMT+1200 (New Zealand Standard Time)", TestUtils.Evaluate("new Date('24 Apr 2010 23:59:57').toTimeString()"));
             Assert.AreEqual("Invalid Date", TestUtils.Evaluate("new Date(NaN).toTimeString()"));
             Assert.AreEqual(0, TestUtils.Evaluate("new Date().toTimeString.length"));
         }
@@ -698,14 +682,6 @@ namespace UnitTests
             if ((double)(int)result == result)
                 return (int)result;
             return result;
-        }
-
-        private static string GetTimezoneString(DateTime date)
-        {
-            var timeZoneInfo = TimeZoneInfo.Local;
-            var offset = timeZoneInfo.GetUtcOffset(date);
-            return string.Format("GMT+{0:d2}{1:d2} ({2})", offset.Hours, offset.Minutes,
-                timeZoneInfo.IsDaylightSavingTime(date) ? timeZoneInfo.DaylightName : timeZoneInfo.StandardName);
         }
     }
 }

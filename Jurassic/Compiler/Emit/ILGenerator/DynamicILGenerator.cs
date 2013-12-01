@@ -3,8 +3,6 @@ using System.Collections.Generic;
 
 namespace Jurassic.Compiler
 {
-#if !SILVERLIGHT
-
     /// <summary>
     /// Represents a generator of CIL bytes.
     /// </summary>
@@ -29,9 +27,7 @@ namespace Jurassic.Compiler
             Object = 16,
             ManagedPointer = 32,
         }
-#pragma warning disable 0649
         private Stack<VESType> operands;
-#pragma warning restore 0649
         private bool stackIsIndeterminate;
 
         // All of the local variables defined within this method.
@@ -45,10 +41,9 @@ namespace Jurassic.Compiler
 
         private struct Fixup
         {
-            public int Position;                // The IL offset to fix up.
-            public int Length;                  // The length of the fix up, in bytes.
-            public int StartOfNextInstruction;  // The IL offset of the start of the next instruction.
-            public DynamicILLabel Label;        // The label that is being jumped to.
+            public int Position;            // The IL offset to fix up.
+            public int Length;              // The length of the fix up, in bytes.
+            public DynamicILLabel Label;    // The label that is being jumped to.
         }
         private List<Fixup> fixups;
 
@@ -112,6 +107,14 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
+        /// Gets the size of the method, in bytes.
+        /// </summary>
+        public override int CodeLength
+        {
+            get { return this.offset; }
+        }
+
+        /// <summary>
         /// Emits a return statement and finalizes the generated code.  Do not emit any more
         /// instructions after calling this method.
         /// </summary>
@@ -129,12 +132,7 @@ namespace Jurassic.Compiler
 
             if (this.exceptionRegions != null && this.exceptionRegions.Count > 0)
             {
-                // Count the number of exception clauses.
-                int clauseCount = 0;
-                foreach (var exceptionRegion in this.exceptionRegions)
-                    clauseCount += exceptionRegion.Clauses.Count;
-
-                var exceptionBytes = new byte[4 + 24 * clauseCount];
+                var exceptionBytes = new byte[4 + 24 * this.exceptionRegions.Count];
                 var writer = new System.IO.BinaryWriter(new System.IO.MemoryStream(exceptionBytes));
 
                 // 4-byte header, see Partition II, section 25.4.5.
@@ -151,26 +149,26 @@ namespace Jurassic.Compiler
                         switch (clause.Type)
                         {
                             case ExceptionClauseType.Catch:
-                                writer.Write(0);                                // Flags
+                                writer.Write(0);                        // Flags
                                 break;
                             case ExceptionClauseType.Filter:
-                                writer.Write(1);                                // Flags
+                                writer.Write(1);                        // Flags
                                 break;
                             case ExceptionClauseType.Finally:
-                                writer.Write(2);                                // Flags
+                                writer.Write(2);                        // Flags
                                 break;
                             case ExceptionClauseType.Fault:
-                                writer.Write(4);                                // Flags
+                                writer.Write(4);                        // Flags
                                 break;
                         }
-                        writer.Write(exceptionRegion.Start);                    // TryOffset
-                        writer.Write(clause.ILStart - exceptionRegion.Start);   // TryLength
-                        writer.Write(clause.ILStart);                           // HandlerOffset
-                        writer.Write(clause.ILLength);                          // HandlerLength
+                        writer.Write(exceptionRegion.Start);            // TryOffset
+                        writer.Write(exceptionRegion.TryLength);        // TryLength
+                        writer.Write(clause.ILStart);                   // HandlerOffset
+                        writer.Write(clause.ILLength);                  // HandlerLength
                         if (clause.Type == ExceptionClauseType.Catch)
-                            writer.Write(clause.CatchToken);                    // ClassToken
+                            writer.Write(clause.CatchToken);            // ClassToken
                         else if (clause.Type == ExceptionClauseType.Filter)
-                            writer.Write(clause.FilterHandlerStart);            // FilterOffset
+                            writer.Write(clause.FilterHandlerStart);    // FilterOffset
                         else
                             writer.Write(0);
                     }
@@ -216,20 +214,21 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Emits a 64-bit integer and increments the offset member variable.
+        /// Emits a 64-bit double and increments the offset member variable.
         /// </summary>
-        /// <param name="value"> The 64-bit integer to emit. </param>
-        private void EmitInt64(long value)
+        /// <param name="value"> The floating point number to emit. </param>
+        private void EmitFloat64(double value)
         {
+            long num = BitConverter.DoubleToInt64Bits(value);
             int offset = this.offset;
-            this.bytes[offset++] = (byte)value;
-            this.bytes[offset++] = (byte)(value >> 8);
-            this.bytes[offset++] = (byte)(value >> 16);
-            this.bytes[offset++] = (byte)(value >> 24);
-            this.bytes[offset++] = (byte)(value >> 32);
-            this.bytes[offset++] = (byte)(value >> 40);
-            this.bytes[offset++] = (byte)(value >> 48);
-            this.bytes[offset++] = (byte)(value >> 56);
+            this.bytes[offset++] = (byte)num;
+            this.bytes[offset++] = (byte)(num >> 8);
+            this.bytes[offset++] = (byte)(num >> 16);
+            this.bytes[offset++] = (byte)(num >> 24);
+            this.bytes[offset++] = (byte)(num >> 32);
+            this.bytes[offset++] = (byte)(num >> 40);
+            this.bytes[offset++] = (byte)(num >> 48);
+            this.bytes[offset++] = (byte)(num >> 56);
             this.offset = offset;
         }
 
@@ -332,13 +331,13 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Emits a one byte opcode plus a 8-byte operand.
+        /// Emits a one byte opcode plus a 4-byte operand.
         /// </summary>
         /// <param name="opCode"> The opcode to emit. </param>
         /// <param name="popCount"> The number of items to pop from the stack. </param>
         /// <param name="pushCount"> The number of items to push onto the stack. </param>
-        /// <param name="emitInt64"> A 64-bit integer to emit. </param>
-        private void Emit1ByteOpCodeInt64(byte opCode, int popCount, int pushCount, long emitInt64)
+        /// <param name="emitFloat64"> A 64-bit integer to emit. </param>
+        private void Emit1ByteOpCodeFloat64(byte opCode, int popCount, int pushCount, double emitFloat64)
         {
             // Enlarge the array if necessary.
             const int instructionSize = 9;
@@ -347,7 +346,7 @@ namespace Jurassic.Compiler
 
             // Emit the instruction bytes.
             this.bytes[this.offset++] = opCode;
-            EmitInt64(emitInt64);
+            EmitFloat64(emitFloat64);
 
             // The instruction pops two values and pushes a value to the stack.
             if (this.stackSize < popCount)
@@ -531,7 +530,8 @@ namespace Jurassic.Compiler
         {
             Emit1ByteOpCode(0x25, 1, 2);
 #if DEBUG
-            PushStackOperand(this.operands.Peek());
+            //if (this.stackIsIndeterminate == false)
+                PushStackOperand(this.operands.Peek());
 #endif
         }
 
@@ -542,6 +542,9 @@ namespace Jurassic.Compiler
         [System.Diagnostics.Conditional("DEBUG")]
         private void PopStackOperands(params VESType[] expectedTypes)
         {
+            //if (this.stackIsIndeterminate == true)
+                //throw new InvalidOperationException("The stack is in an indeterminate state because of a previous unconditional jump.  Define a label to restore the stack.");
+            //    return;
             List<VESType> actualTypes = new List<VESType>();
             for (int i = 0; i < expectedTypes.Length; i++)
                 actualTypes.Add(this.operands.Pop());
@@ -558,6 +561,9 @@ namespace Jurassic.Compiler
         [System.Diagnostics.Conditional("DEBUG")]
         private void PushStackOperand(VESType type)
         {
+            //if (this.stackIsIndeterminate == true)
+                //throw new InvalidOperationException("The stack is in an indeterminate state because of a previous unconditional jump.  Define a label to restore the stack.");
+            //    return;
             this.operands.Push(type);
             if (this.operands.Count != this.stackSize)
                 throw new InvalidOperationException("Inconsistant internal stack sizes.");
@@ -585,140 +591,44 @@ namespace Jurassic.Compiler
 #endif
         }
 
-        private enum ArithmeticOperator
+        /// <summary>
+        /// Checks that stack operands are valid for a binary operation.
+        /// </summary>
+        [System.Diagnostics.Conditional("DEBUG")]
+        private void CheckBinaryOperation()
         {
-            Add,
-            Subtract,
-            Multiply,
-            Divide,
-            Remainder,
+            //if (this.stackIsIndeterminate == true)
+            //    return;
+            var argumentType = this.operands.Peek();
+            if (argumentType != VESType.Int32 && argumentType != VESType.Float)
+                throw new InvalidOperationException(string.Format("This binary operation can only operate on numbers ({0} found).", argumentType));
+            PopStackOperands(argumentType, argumentType);
+            PushStackOperand(argumentType);
         }
 
         /// <summary>
-        /// Checks that stack operands are valid for a binary arithmetic operation.
+        /// Checks that stack operands are valid for a binary operation.
         /// </summary>
-        /// <param name="operator"> The type of operation to check. </param>
+        /// <param name="pushType"> The type of operand that is pushed on the stack. </param>
+        /// <param name="worksOnObjects"> <c>true</c> if the operation works on object references. </param>
         [System.Diagnostics.Conditional("DEBUG")]
-        private void CheckArithmeticOperands(ArithmeticOperator @operator)
+        private void CheckBinaryOperation(VESType pushType, bool worksOnObjects = false)
         {
-            // Pop the operand types from the stack.
-            var right = this.operands.Pop();
-            var left = this.operands.Pop();
-
-            // Enumerate all the possible combinations.
-            switch (left)
+            //if (this.stackIsIndeterminate == true)
+            //    return;
+            var argumentType = this.operands.Peek();
+            if (worksOnObjects == true)
             {
-                case VESType.Int32:
-                    if (right != VESType.Int32 && right != VESType.NativeInt && (right != VESType.ManagedPointer || @operator != ArithmeticOperator.Add))
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    PushStackOperand(right);
-                    break;
-
-                case VESType.Int64:
-                    if (right != VESType.Int64)
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    PushStackOperand(VESType.Int64);
-                    break;
-
-                case VESType.NativeInt:
-                    if (right != VESType.Int32 && right != VESType.NativeInt && (right != VESType.ManagedPointer || @operator != ArithmeticOperator.Add))
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    PushStackOperand(right == VESType.ManagedPointer ? VESType.ManagedPointer : VESType.NativeInt);
-                    break;
-
-                case VESType.Float:
-                    if (right != VESType.Float)
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    PushStackOperand(VESType.Float);
-                    break;
-
-                case VESType.ManagedPointer:
-                    if (@operator == ArithmeticOperator.Add)
-                    {
-                        if (right != VESType.Int32 && right != VESType.NativeInt)
-                            throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    }
-                    else if (@operator == ArithmeticOperator.Subtract)
-                    {
-                        if (right != VESType.Int32 && right != VESType.NativeInt && right != VESType.ManagedPointer)
-                            throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    }
-                    else
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    PushStackOperand(right == VESType.ManagedPointer ? VESType.NativeInt : VESType.ManagedPointer);
-                    break;
-
-                case VESType.Object:
-                    throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
+                if (argumentType != VESType.Int32 && argumentType != VESType.Float && argumentType != VESType.Object)
+                    throw new InvalidOperationException(string.Format("This binary operation can only operate on numbers or object references ({0} found).", argumentType));
             }
-        }
-
-        private enum ComparisonOperator
-        {
-            Equal,
-            NotEqual,
-            LessThan,
-            LessThanUnsigned,
-            LessThanOrEqual,
-            LessThanOrEqualUnsigned,
-            GreaterThan,
-            GreaterThanUnsigned,
-            GreaterThanOrEqual,
-            GreaterThanOrEqualUnsigned,
-        }
-
-        /// <summary>
-        /// Checks that stack operands are valid for a binary comparison operation.
-        /// </summary>
-        /// <param name="operator"> The type of operation to check. </param>
-        /// <param name="branchOperation"> The operation is part of a branch. </param>
-        [System.Diagnostics.Conditional("DEBUG")]
-        private void CheckComparisonOperands(ComparisonOperator @operator, bool branchOperation)
-        {
-            // Pop the operand types from the stack.
-            var right = this.operands.Pop();
-            var left = this.operands.Pop();
-
-
-            // Enumerate all the possible combinations.
-            switch (left)
+            else
             {
-                case VESType.Int32:
-                    if (right != VESType.Int32 && right != VESType.NativeInt)
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    break;
-
-                case VESType.Int64:
-                    if (right != VESType.Int64)
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    break;
-
-                case VESType.NativeInt:
-                    if (right != VESType.Int32 && right != VESType.NativeInt && (right != VESType.ManagedPointer || (@operator != ComparisonOperator.Equal && @operator != ComparisonOperator.NotEqual)))
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    break;
-
-                case VESType.Float:
-                    if (right != VESType.Float)
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    break;
-
-                case VESType.ManagedPointer:
-                    if (right != VESType.ManagedPointer && (right != VESType.NativeInt || (@operator != ComparisonOperator.Equal && @operator != ComparisonOperator.NotEqual)))
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    break;
-
-                case VESType.Object:
-                    if (right != VESType.Object || (@operator != ComparisonOperator.Equal && @operator != ComparisonOperator.NotEqual && @operator != ComparisonOperator.GreaterThanUnsigned))
-                        throw new InvalidOperationException(string.Format("Invalid stack operand(s) ({0} {1} {2}).", @operator, left, right));
-                    break;
+                if (argumentType != VESType.Int32 && argumentType != VESType.Float)
+                    throw new InvalidOperationException(string.Format("This binary operation can only operate on numbers ({0} found).", argumentType));
             }
-
-            if (branchOperation == false)
-            {
-                // All comparison operations produce an int32 as the output.
-                PushStackOperand(VESType.Int32);
-            }
+            PopStackOperands(argumentType, argumentType);
+            PushStackOperand(pushType);
         }
 
         /// <summary>
@@ -770,11 +680,11 @@ namespace Jurassic.Compiler
                     var currentStack = this.operands.ToArray();
                     if (previousStack.Length != currentStack.Length)
                         throw new InvalidOperationException(string.Format("Stack mismatch from a previous branch.  Expected: '{0}' but was: '{1}'",
-                            StringHelpers.Join(", ", previousStack), StringHelpers.Join(", ", currentStack)));
+                            string.Join(", ", previousStack), string.Join(", ", currentStack)));
                     for (int i = 0; i < previousStack.Length; i++)
                         if (previousStack[i] != currentStack[i])
                             throw new InvalidOperationException(string.Format("Stack mismatch from a previous branch.  Expected: '{0}' but was: '{1}'",
-                                StringHelpers.Join(", ", previousStack), StringHelpers.Join(", ", currentStack)));
+                                string.Join(", ", previousStack), string.Join(", ", currentStack)));
                 }
                 else
                 {
@@ -787,19 +697,19 @@ namespace Jurassic.Compiler
                 }
             }
 #else
-            if (label2.EvaluationStackSize >= 0)
+            if (label2.EvaluationStack != null)
             {
                 if (this.stackIsIndeterminate == false)
                 {
                     // Check the number of items matches.
-                    if (label2.EvaluationStackSize != this.stackSize)
+                    if ((int)label2.EvaluationStack != this.stackSize)
                         throw new InvalidOperationException(string.Format("Stack size mismatch from a previous branch.  Expected {0} items but found {1} items.",
-                            label2.EvaluationStackSize, this.stackSize));
+                            (int)label2.EvaluationStack, this.stackSize));
                 }
                 else
                 {
                     // Replace the evaluation stack with the one from the label.
-                    this.stackSize = label2.EvaluationStackSize;
+                    this.stackSize = (int)label2.EvaluationStack;
                     this.stackIsIndeterminate = false;
                 }
             }
@@ -819,12 +729,10 @@ namespace Jurassic.Compiler
                     throw new InvalidOperationException("Undefined label.");
 
                 // Jump offsets are relative to the next instruction.
-                jumpOffset -= fix.StartOfNextInstruction;
+                jumpOffset -= fix.Position + fix.Length;
 
                 // Patch the jump offset;
                 var position = fix.Position;
-                if (fix.Length != 4)
-                    throw new NotImplementedException("Short jumps are not supported.");
                 this.bytes[position++] = (byte)jumpOffset;
                 this.bytes[position++] = (byte)(jumpOffset >> 8);
                 this.bytes[position++] = (byte)(jumpOffset >> 16);
@@ -834,66 +742,13 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Unconditionally branches to the given label.
+        /// Branches to the given label, possibly with a condition.
         /// </summary>
         /// <param name="label"> The label to branch to. </param>
         /// <param name="opCode"> The one-byte operation identifier. </param>
         /// <param name="popCount"> The number of operands to pop from the stack. </param>
         /// <param name="popType"> The type of operand to pop from the stack. </param>
-        private void BranchCore(ILLabel label, byte opCode)
-        {
-            // Emit the branch opcode.
-            Emit1ByteOpCode(opCode, 0, 0);
-
-            // Emit the label.
-            EmitLabel(label, this.offset + 4);
-
-            // This is an unconditional branch.
-            UnconditionalBranch();
-        }
-
-        /// <summary>
-        /// Conditionally branches to the given label, popping one operand from the stack.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        /// <param name="opCode"> The one-byte operation identifier. </param>
-        /// <param name="operandType"> The type of operand to pop from the stack. </param>
-        private void BranchCore(ILLabel label, byte opCode, VESType operandType)
-        {
-            // Emit the branch opcode.
-            Emit1ByteOpCode(opCode, 1, 0);
-
-            // The instruction pops one value from the stack and pushes none.
-            PopStackOperands(operandType);
-
-            // Emit the label.
-            EmitLabel(label, this.offset + 4);
-        }
-
-        /// <summary>
-        /// Conditionally branches to the given label, popping two operands from the stack.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        /// <param name="opCode"> The one-byte operation identifier. </param>
-        /// <param name="@operator"> The type of comparison operation. </param>
-        private void BranchCore(ILLabel label, byte opCode, ComparisonOperator @operator)
-        {
-            // Emit the branch opcode.
-            Emit1ByteOpCode(opCode, 2, 0);
-
-            // The instruction pops two values from the stack and pushes none.
-            CheckComparisonOperands(@operator, branchOperation: true);
-
-            // Emit the label.
-            EmitLabel(label, this.offset + 4);
-        }
-
-        /// <summary>
-        /// Emits a single label.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        /// <param name="startOfNextInstruction"> The IL offset of the start of the next instruction. </param>
-        private void EmitLabel(ILLabel label, int startOfNextInstruction)
+        private void BranchCore(ILLabel label, byte opCode, int popCount, VESType popType)
         {
             if (label as DynamicILLabel == null)
                 throw new ArgumentNullException("label");
@@ -901,21 +756,21 @@ namespace Jurassic.Compiler
             if (label2.ILGenerator != this)
                 throw new ArgumentException("The label wasn't created by this generator.", "label");
 
-            // Enlarge the array if necessary.
-            if (this.offset + 4 >= this.bytes.Length)
-                EnlargeArray(4);
-
             if (label2.ILOffset >= 0)
             {
                 // The label is defined.
-                EmitInt32(label2.ILOffset - startOfNextInstruction);
+                Emit1ByteOpCodeInt32(opCode, popCount, 0, label2.ILOffset - this.offset - 5);
             }
             else
             {
                 // The label is not defined.  Add a fix up.
-                EmitInt32(0);
-                this.fixups.Add(new Fixup() { Position = this.offset - 4, Length = 4, StartOfNextInstruction = startOfNextInstruction, Label = label2 });
+                Emit1ByteOpCodeInt32(opCode, popCount, 0, 0);
+                this.fixups.Add(new Fixup() { Position = this.offset - 4, Length = 4, Label = label2 });
             }
+
+            // The instruction pops zero or more values from the stack and pushes none.
+            for (int i = 0; i < popCount; i++)
+                PopStackOperands(popType);
 
 #if DEBUG
             if (label2.EvaluationStack == null)
@@ -930,24 +785,24 @@ namespace Jurassic.Compiler
                 var currentStack = this.operands.ToArray();
                 if (previousStack.Length != currentStack.Length)
                     throw new InvalidOperationException(string.Format("Stack mismatch from a previous branch.  Expected: '{0}' but was: '{1}'",
-                        StringHelpers.Join(", ", previousStack), StringHelpers.Join(", ", currentStack)));
+                        string.Join(", ", previousStack), string.Join(", ", currentStack)));
                 for (int i = 0; i < previousStack.Length; i++)
                     if (previousStack[i] != currentStack[i])
                         throw new InvalidOperationException(string.Format("Stack mismatch from a previous branch.  Expected: '{0}' but was: '{1}'",
-                            StringHelpers.Join(", ", previousStack), StringHelpers.Join(", ", currentStack)));
+                            string.Join(", ", previousStack), string.Join(", ", currentStack)));
             }
 #else
-            if (label2.EvaluationStackSize < 0)
+            if (label2.EvaluationStack == null)
             {
                 // Record the number of items on the evaluation stack.
-                label2.EvaluationStackSize = this.stackSize;
+                label2.EvaluationStack = this.stackSize;
             }
             else
             {
                 // Check the number of items matches.
-                if (label2.EvaluationStackSize != this.stackSize)
+                if ((int)label2.EvaluationStack != this.stackSize)
                     throw new InvalidOperationException(string.Format("Stack size mismatch from a previous branch.  Expected {0} items but was {1} items.",
-                        label2.EvaluationStackSize, this.stackSize));
+                        (int)label2.EvaluationStack, this.stackSize));
             }
 #endif
         }
@@ -958,7 +813,8 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void Branch(ILLabel label)
         {
-            BranchCore(label, 0x38);
+            BranchCore(label, 0x38, 0, 0);
+            UnconditionalBranch();
         }
 
         /// <summary>
@@ -967,7 +823,7 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfZero(ILLabel label)
         {
-            BranchCore(label, 0x39, VESType.Int32 | VESType.Int64 | VESType.Float |
+            BranchCore(label, 0x39, 1, VESType.Int32 | VESType.Int64 | VESType.Float |
                 VESType.ManagedPointer | VESType.NativeInt | VESType.Object);
         }
 
@@ -978,7 +834,7 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfNotZero(ILLabel label)
         {
-            BranchCore(label, 0x3A, VESType.Int32 | VESType.Int64 | VESType.Float |
+            BranchCore(label, 0x3A, 1, VESType.Int32 | VESType.Int64 | VESType.Float |
                 VESType.ManagedPointer | VESType.NativeInt | VESType.Object);
         }
 
@@ -988,7 +844,8 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfEqual(ILLabel label)
         {
-            BranchCore(label, 0x3B, ComparisonOperator.Equal);
+            BranchCore(label, 0x3B, 2, VESType.Int32 | VESType.Int64 | VESType.Float |
+                VESType.ManagedPointer | VESType.NativeInt | VESType.Object);
         }
 
         /// <summary>
@@ -997,7 +854,8 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfNotEqual(ILLabel label)
         {
-            BranchCore(label, 0x40, ComparisonOperator.NotEqual);
+            BranchCore(label, 0x40, 2, VESType.Int32 | VESType.Int64 | VESType.Float |
+                VESType.ManagedPointer | VESType.NativeInt | VESType.Object);
         }
 
         /// <summary>
@@ -1007,19 +865,8 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfGreaterThan(ILLabel label)
         {
-            BranchCore(label, 0x3D, ComparisonOperator.GreaterThan);
-        }
-
-        /// <summary>
-        /// Branches to the given label if the first value on the stack is greater than the second
-        /// value on the stack.  If the operands are integers then they are treated as if they are
-        /// unsigned.  If the operands are floating point numbers then a NaN value will trigger a
-        /// branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfGreaterThanUnsigned(ILLabel label)
-        {
-            BranchCore(label, 0x42, ComparisonOperator.GreaterThanUnsigned);
+            BranchCore(label, 0x3D, 2, VESType.Int32 | VESType.Int64 | VESType.Float |
+                VESType.ManagedPointer | VESType.NativeInt);
         }
 
         /// <summary>
@@ -1029,19 +876,8 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfGreaterThanOrEqual(ILLabel label)
         {
-            BranchCore(label, 0x3C, ComparisonOperator.GreaterThanOrEqual);
-        }
-
-        /// <summary>
-        /// Branches to the given label if the first value on the stack is greater than or equal to
-        /// the second value on the stack.  If the operands are integers then they are treated as
-        /// if they are unsigned.  If the operands are floating point numbers then a NaN value will
-        /// trigger a branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfGreaterThanOrEqualUnsigned(ILLabel label)
-        {
-            BranchCore(label, 0x41, ComparisonOperator.GreaterThanOrEqual);
+            BranchCore(label, 0x3C, 2, VESType.Int32 | VESType.Int64 | VESType.Float |
+                VESType.ManagedPointer | VESType.NativeInt);
         }
 
         /// <summary>
@@ -1051,19 +887,8 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfLessThan(ILLabel label)
         {
-            BranchCore(label, 0x3F, ComparisonOperator.LessThan);
-        }
-
-        /// <summary>
-        /// Branches to the given label if the first value on the stack is less than the second
-        /// value on the stack.  If the operands are integers then they are treated as if they are
-        /// unsigned.  If the operands are floating point numbers then a NaN value will trigger a
-        /// branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfLessThanUnsigned(ILLabel label)
-        {
-            BranchCore(label, 0x44, ComparisonOperator.LessThanUnsigned);
+            BranchCore(label, 0x3F, 2, VESType.Int32 | VESType.Int64 | VESType.Float |
+                VESType.ManagedPointer | VESType.NativeInt);
         }
 
         /// <summary>
@@ -1073,19 +898,8 @@ namespace Jurassic.Compiler
         /// <param name="label"> The label to branch to. </param>
         public override void BranchIfLessThanOrEqual(ILLabel label)
         {
-            BranchCore(label, 0x3E, ComparisonOperator.LessThanOrEqual);
-        }
-
-        /// <summary>
-        /// Branches to the given label if the first value on the stack is less than or equal to
-        /// the second value on the stack.  If the operands are integers then they are treated as
-        /// if they are unsigned.  If the operands are floating point numbers then a NaN value will
-        /// trigger a branch.
-        /// </summary>
-        /// <param name="label"> The label to branch to. </param>
-        public override void BranchIfLessThanOrEqualUnsigned(ILLabel label)
-        {
-            BranchCore(label, 0x3E, ComparisonOperator.LessThanOrEqualUnsigned);
+            BranchCore(label, 0x3E, 2, VESType.Int32 | VESType.Int64 | VESType.Float |
+                VESType.ManagedPointer | VESType.NativeInt);
         }
 
         /// <summary>
@@ -1106,43 +920,8 @@ namespace Jurassic.Compiler
                 if (popCount > 0)
                     PopStackOperands(ToVESType(this.dynamicMethod.ReturnType));
                 if (this.stackSize != 0)
-                {
-#if DEBUG
-                    throw new InvalidOperationException(string.Format("The evaluation stack should be empty.  Types still on stack: {0}.", StringHelpers.Join(", ", this.operands)));
-#else
-                    throw new InvalidOperationException("The evaluation stack should be empty.");
-#endif
-                }
+                    throw new InvalidOperationException(string.Format("The evaluation stack should be empty.  Types still on stack: {0}.", string.Join(", ", this.operands)));
             }
-        }
-
-        /// <summary>
-        /// Creates a jump table.  A value is popped from the stack - this value indicates the
-        /// index of the label in the <paramref name="labels"/> array to jump to.
-        /// </summary>
-        /// <param name="labels"> A array of labels. </param>
-        public override void Switch(ILLabel[] labels)
-        {
-            if (labels == null)
-                throw new ArgumentNullException("labels");
-
-            // Calculate the size of the instruction and the position of the start of the next instruction.
-            int instructionSize = 1 + 4 + labels.Length * 4;
-            int startOfNextInstruction = this.offset + instructionSize;
-
-            // Enlarge the array if necessary.
-            if (this.offset + instructionSize >= this.bytes.Length)
-                EnlargeArray(instructionSize);
-
-            // switch = 45
-            Emit1ByteOpCode(0x45, 1, 0);
-
-            // Emit the number of labels.
-            EmitInt32(labels.Length);
-
-            // Emit the labels.
-            foreach (var label in labels)
-                EmitLabel(label, startOfNextInstruction);
         }
 
 
@@ -1342,25 +1121,12 @@ namespace Jurassic.Compiler
             }
             else
             {
-                // ldc.i4 value = 20 <int32>
+                // ldc.i4.s value = 20 <int32>
                 Emit1ByteOpCodeInt32(0x20, 0, 1, value);
             }
 
             // The instruction pushes a value onto the stack.
             PushStackOperand(VESType.Int32);
-        }
-
-        /// <summary>
-        /// Pushes a 64-bit constant value onto the stack.
-        /// </summary>
-        /// <param name="value"> The 64-bit integer to push onto the stack. </param>
-        public override void LoadInt64(long value)
-        {
-            // ldc.i8 value = 21 <int64>
-            Emit1ByteOpCodeInt64(0x21, 0, 1, value);
-
-            // The instruction pushes a value onto the stack.
-            PushStackOperand(VESType.Int64);
         }
 
         /// <summary>
@@ -1370,7 +1136,7 @@ namespace Jurassic.Compiler
         public override void LoadDouble(double value)
         {
             // ldc.r8 = 23 <float64>
-            Emit1ByteOpCodeInt64(0x23, 0, 1, BitConverter.DoubleToInt64Bits(value));
+            Emit1ByteOpCodeFloat64(0x23, 0, 1, value);
 
             // The instruction pushes a value onto the stack.
             PushStackOperand(VESType.Float);
@@ -1402,10 +1168,10 @@ namespace Jurassic.Compiler
         /// is equal to the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public override void CompareEqual()
+        public override void Equal()
         {
             Emit2ByteOpCode(0xFE, 0x01, 2, 1);
-            CheckComparisonOperands(ComparisonOperator.Equal, branchOperation: false);
+            CheckBinaryOperation(VESType.Int32, worksOnObjects: true);
         }
 
         /// <summary>
@@ -1413,10 +1179,10 @@ namespace Jurassic.Compiler
         /// is greater than the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public override void CompareGreaterThan()
+        public override void GreaterThan()
         {
             Emit2ByteOpCode(0xFE, 0x02, 2, 1);
-            CheckComparisonOperands(ComparisonOperator.GreaterThan, branchOperation: false);
+            CheckBinaryOperation(VESType.Int32);
         }
 
         /// <summary>
@@ -1424,10 +1190,10 @@ namespace Jurassic.Compiler
         /// is greater than the second, or <c>0</c> otherwise.  Produces <c>1</c> if one or both
         /// of the arguments are <c>NaN</c>.  Integers are considered to be unsigned.
         /// </summary>
-        public override void CompareGreaterThanUnsigned()
+        public override void GreaterThanUnsigned()
         {
             Emit2ByteOpCode(0xFE, 0x03, 2, 1);
-            CheckComparisonOperands(ComparisonOperator.GreaterThanUnsigned, branchOperation: false);
+            CheckBinaryOperation(VESType.Int32);
         }
 
         /// <summary>
@@ -1435,10 +1201,10 @@ namespace Jurassic.Compiler
         /// is less than the second, or <c>0</c> otherwise.  Produces <c>0</c> if one or both
         /// of the arguments are <c>NaN</c>.
         /// </summary>
-        public override void CompareLessThan()
+        public override void LessThan()
         {
             Emit2ByteOpCode(0xFE, 0x04, 2, 1);
-            CheckComparisonOperands(ComparisonOperator.LessThan, branchOperation: false);
+            CheckBinaryOperation(VESType.Int32);
         }
 
         /// <summary>
@@ -1446,10 +1212,10 @@ namespace Jurassic.Compiler
         /// is less than the second, or <c>0</c> otherwise.  Produces <c>1</c> if one or both
         /// of the arguments are <c>NaN</c>.  Integers are considered to be unsigned.
         /// </summary>
-        public override void CompareLessThanUnsigned()
+        public override void LessThanUnsigned()
         {
             Emit2ByteOpCode(0xFE, 0x05, 2, 1);
-            CheckComparisonOperands(ComparisonOperator.LessThanUnsigned, branchOperation: false);
+            CheckBinaryOperation(VESType.Int32);
         }
 
 
@@ -1464,7 +1230,7 @@ namespace Jurassic.Compiler
         public override void Add()
         {
             Emit1ByteOpCode(0x58, 2, 1);
-            CheckArithmeticOperands(ArithmeticOperator.Add);
+            CheckBinaryOperation();
         }
 
         /// <summary>
@@ -1474,7 +1240,7 @@ namespace Jurassic.Compiler
         public override void Subtract()
         {
             Emit1ByteOpCode(0x59, 2, 1);
-            CheckArithmeticOperands(ArithmeticOperator.Subtract);
+            CheckBinaryOperation();
         }
 
         /// <summary>
@@ -1484,7 +1250,7 @@ namespace Jurassic.Compiler
         public override void Multiply()
         {
             Emit1ByteOpCode(0x5A, 2, 1);
-            CheckArithmeticOperands(ArithmeticOperator.Multiply);
+            CheckBinaryOperation();
         }
 
         /// <summary>
@@ -1494,7 +1260,7 @@ namespace Jurassic.Compiler
         public override void Divide()
         {
             Emit1ByteOpCode(0x5B, 2, 1);
-            CheckArithmeticOperands(ArithmeticOperator.Divide);
+            CheckBinaryOperation();
         }
 
         /// <summary>
@@ -1504,7 +1270,7 @@ namespace Jurassic.Compiler
         public override void Remainder()
         {
             Emit1ByteOpCode(0x5D, 2, 1);
-            CheckArithmeticOperands(ArithmeticOperator.Remainder);
+            CheckBinaryOperation();
         }
 
         /// <summary>
@@ -1515,9 +1281,12 @@ namespace Jurassic.Compiler
             Emit1ByteOpCode(0x65, 1, 1);
 
 #if DEBUG
-            var topOfStack = this.operands.Peek();
-            PopStackOperands(VESType.Int32 | VESType.Int64 | VESType.NativeInt | VESType.Float);
-            PushStackOperand(topOfStack);
+            if (this.stackIsIndeterminate == false)
+            {
+                var topOfStack = this.operands.Peek();
+                PopStackOperands(VESType.Int32 | VESType.Float);
+                PushStackOperand(topOfStack);
+            }
 #endif
         }
 
@@ -1618,25 +1387,6 @@ namespace Jurassic.Compiler
             Emit1ByteOpCodeInt32(0x8C, 1, 1, token);
             PopStackOperands(VESType.Int32 | VESType.Float);
             PushStackOperand(VESType.Object);
-        }
-
-        /// <summary>
-        /// Pops an object reference (representing a boxed value) from the stack, extracts the value,
-        /// then pushes the value onto the stack.
-        /// </summary>
-        /// <param name="type"> The type of the boxed value.  This should be a value type. </param>
-        public override void Unbox(Type type)
-        {
-            if (type == null)
-                throw new ArgumentNullException("type");
-            if (type.IsValueType == false)
-                throw new ArgumentException("The type of the boxed value must be a value type.", "type");
-
-            // Get the token for the type.
-            int token = this.GetToken(type);
-            Emit1ByteOpCodeInt32(0xA5, 1, 1, token);
-            PopStackOperands(VESType.Object);
-            PushStackOperand(ToVESType(type));
         }
 
         /// <summary>
@@ -1790,7 +1540,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="type"> The type to convert. </param>
         /// <returns> The corresponding operand type. </returns>
-        private static VESType ToVESType(Type type)
+        private VESType ToVESType(Type type)
         {
             switch (Type.GetTypeCode(type))
             {
@@ -1837,8 +1587,7 @@ namespace Jurassic.Compiler
             else
             {
                 // ldfld = 7B <token>
-                PopStackOperands(VESType.Object | VESType.ManagedPointer | VESType.NativeInt);
-                Emit1ByteOpCodeInt32(0x7B, 1, 1, token);
+                Emit1ByteOpCodeInt32(0x7B, 0, 1, token);
             }
             PushStackOperand(ToVESType(field.FieldType));
         }
@@ -1854,40 +1603,11 @@ namespace Jurassic.Compiler
         {
             if (type == null)
                 throw new ArgumentNullException("type");
-
-            //if (this.EnableDiagnostics == true && ScriptEngine.LowPrivilegeEnvironment == false)
-            //{
-            //    // Provides more information if a cast fails.
-            //    var endOfCheckLabel = this.CreateLabel();
-            //    this.Duplicate();
-            //    this.IsInstance(type);
-            //    this.BranchIfNotNull(endOfCheckLabel);
-            //    this.LoadToken(type);
-            //    this.Call(ReflectionHelpers.Type_GetTypeFromHandle);
-            //    this.LoadString(Environment.StackTrace);
-            //    this.Call(typeof(DynamicILGenerator).GetMethod("OnFailedCast", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic));
-            //    this.Throw();
-            //    this.DefineLabelPosition(endOfCheckLabel);
-            //}
-
             int token = this.GetToken(type);
             Emit1ByteOpCodeInt32(0x74, 1, 1, token);
             PopStackOperands(VESType.Object);
             PushStackOperand(VESType.Object);
         }
-
-        ///// <summary>
-        ///// Called if a cast fails.
-        ///// </summary>
-        ///// <param name="obj"> The object instance to cast. </param>
-        ///// <param name="expectedType"> The expected type of the instance. </param>
-        ///// <param name="stackTrace"> The stack trace when CastClass was called. </param>
-        ///// <returns> An exception to throw. </returns>
-        //private static Exception OnFailedCast(object obj, Type expectedType, string stackTrace)
-        //{
-        //    return new InvalidCastException(string.Format("Could not cast {0} to {1} --> \r\n{2} --> \r\n{3} -->",
-        //        obj == null ? "null" : obj.GetType().ToString(), expectedType, stackTrace, new System.Diagnostics.StackTrace(0)));
-        //}
 
         /// <summary>
         /// Pops an object off the stack, checks that the object inherits from or implements the
@@ -1977,6 +1697,99 @@ namespace Jurassic.Compiler
             PushStackOperand(VESType.NativeInt);
         }
 
+        /// <summary>
+        /// Pops the method arguments off the stack, pops a method pointer off the stack, calls the
+        /// unmanaged method indicated by the method pointer, then pushes the result to the stack (if
+        /// there was one).
+        /// </summary>
+        /// <param name="unmanagedCallingConvention"> The unmanaged calling convention. </param>
+        /// <param name="returnType"> The return type for the method to be called. </param>
+        /// <param name="parameterTypes"> The types for each parameter accepted by the method
+        /// (including the "this" parameter, if present). </param>
+        public override void CallIndirect(System.Runtime.InteropServices.CallingConvention unmanagedCallingConvention, Type returnType, Type[] parameterTypes)
+        {
+            if (returnType == null)
+                throw new ArgumentNullException("returnType");
+            if (parameterTypes == null)
+                throw new ArgumentNullException("parameterTypes");
+
+            // Get a token for the method signature.
+            var sigHelper = System.Reflection.Emit.SignatureHelper.GetMethodSigHelper(unmanagedCallingConvention, returnType);
+            foreach (var parameterType in parameterTypes)
+                sigHelper.AddArgument(parameterType);
+            int token = this.dynamicILInfo.GetTokenFor(sigHelper.GetSignature());
+
+            // Emit the calli instruction.
+            EmitCallIndirect(returnType, parameterTypes, token);
+        }
+
+        /// <summary>
+        /// Pops the method arguments off the stack, pops a method pointer off the stack, calls the
+        /// managed method indicated by the method pointer, then pushes the result to the stack
+        /// (if there was one).
+        /// </summary>
+        /// <param name="callingConvention"> The managed calling convention. </param>
+        /// <param name="returnType"> The return type for the method to be called. </param>
+        /// <param name="parameterTypes"> The types for each parameter accepted by the method
+        /// (including the "this" parameter, if present). </param>
+        /// <param name="optionalParameterTypes"> The types for each optional parameter (only
+        /// applies to varargs calls). </param>
+        public override void CallIndirect(System.Reflection.CallingConventions callingConvention, Type returnType, Type[] parameterTypes, Type[] optionalParameterTypes = null)
+        {
+            if (returnType == null)
+                throw new ArgumentNullException("returnType");
+            if (parameterTypes == null)
+                throw new ArgumentNullException("parameterTypes");
+            if (optionalParameterTypes != null && (callingConvention & System.Reflection.CallingConventions.VarArgs) == 0)
+                throw new ArgumentException("Optional parameters must be combined with the Varargs calling convention.", "optionalParameterTypes");
+
+            // Get a token for the method signature.
+            var sigHelper = System.Reflection.Emit.SignatureHelper.GetMethodSigHelper(callingConvention, returnType);
+            foreach (var parameterType in parameterTypes)
+                sigHelper.AddArgument(parameterType);
+            if (optionalParameterTypes != null)
+            {
+                sigHelper.AddSentinel();
+                foreach (var parameterType in optionalParameterTypes)
+                    sigHelper.AddArgument(parameterType);
+            }
+            int token = this.dynamicILInfo.GetTokenFor(sigHelper.GetSignature());
+
+            // Emit the calli instruction.
+            EmitCallIndirect(returnType, parameterTypes, token);
+        }
+
+        /// <summary>
+        /// Pops the method arguments off the stack, pops a method pointer off the stack, calls the
+        /// method indicated by the method pointer, then pushes the result to the stack (if there
+        /// was one).
+        /// </summary>
+        /// <param name="returnType"> The return type for the method to be called. </param>
+        /// <param name="parameterTypes"> The types for each parameter accepted by the method. </param>
+        /// <param name="token"> The method signature token. </param>
+        private void EmitCallIndirect(Type returnType, Type[] parameterTypes, int token)
+        {
+            // Emit the calli instruction.
+            Emit1ByteOpCodeInt32(0x29, parameterTypes.Length, returnType == typeof(void) ? 0 : 1, token);
+
+#if DEBUG
+            // Check the stack.
+            var operandTypes = new List<VESType>(parameterTypes.Length);
+            foreach (var parameterType in parameterTypes)
+            {
+                if (parameterType.IsByRef == true)
+                    operandTypes.Add(VESType.ManagedPointer);
+                else
+                    operandTypes.Add(ToVESType(parameterType));
+            }
+            PopStackOperands(operandTypes.ToArray());
+            if (returnType != typeof(void))
+                PushStackOperand(ToVESType(returnType));
+#endif
+        }
+
+
+
 
 
         //     ARRAYS
@@ -2039,7 +1852,7 @@ namespace Jurassic.Compiler
                     Emit1ByteOpCode(0x99, 2, 1);
                     break;
                 default:
-                    if (type.IsClass == true)
+                    if (type == typeof(object))
                         Emit1ByteOpCode(0x9A, 2, 1);
                     else
                     {
@@ -2087,7 +1900,7 @@ namespace Jurassic.Compiler
                     Emit1ByteOpCode(0xA1, 3, 0);
                     break;
                 default:
-                    if (type.IsClass == true)
+                    if (type == typeof(object))
                         Emit1ByteOpCode(0xA2, 3, 0);
                     else
                     {
@@ -2267,7 +2080,8 @@ namespace Jurassic.Compiler
         public override void Leave(ILLabel label)
         {
             ClearEvaluationStack();
-            BranchCore(label, 0xDD);
+            BranchCore(label, 0xDD, 0, 0);
+            this.UnconditionalBranch();
         }
 
         /// <summary>
@@ -2277,7 +2091,7 @@ namespace Jurassic.Compiler
         public override void EndFinally()
         {
             Emit1ByteOpCode(0xDC, 0, 0);
-            UnconditionalBranch();
+            this.UnconditionalBranch();
         }
 
         /// <summary>
@@ -2345,7 +2159,7 @@ namespace Jurassic.Compiler
 
 
 
-        //     DEBUGGING SUPPORT
+        //     MISC
         //_________________________________________________________________________________________
 
         /// <summary>
@@ -2356,18 +2170,10 @@ namespace Jurassic.Compiler
             Emit1ByteOpCode(0x01, 0, 0);
         }
 
-        /// <summary>
-        /// Marks a sequence point in the Microsoft intermediate language (MSIL) stream.
-        /// </summary>
-        /// <param name="document"> The document for which the sequence point is being defined. </param>
-        /// <param name="startLine"> The line where the sequence point begins. </param>
-        /// <param name="startColumn"> The column in the line where the sequence point begins. </param>
-        /// <param name="endLine"> The line where the sequence point ends. </param>
-        /// <param name="endColumn"> The column in the line where the sequence point ends. </param>
-        public override void MarkSequencePoint(System.Diagnostics.SymbolStore.ISymbolDocumentWriter document, int startLine, int startColumn, int endLine, int endColumn)
-        {
-            // DynamicMethod does not support sequence points.
-        }
+
+
+        //     DEBUGGING SUPPORT
+        //_________________________________________________________________________________________
 
 #if DEBUG
 
@@ -2379,7 +2185,7 @@ namespace Jurassic.Compiler
         {
             // Disassemble the IL.
             var reader = new ClrTest.Reflection.ILReader(
-                new ClrTest.Reflection.ByteArrayILProvider(this.CodeBytes, this.offset),
+                new ClrTest.Reflection.ByteArrayILProvider(this.CodeBytes, this.CodeLength),
                 new ClrTest.Reflection.DynamicILInfoTokenResolver(this.dynamicILInfo));
             var writer = new System.IO.StringWriter();
             var visitor = new ClrTest.Reflection.ReadableILStringVisitor(new ClrTest.Reflection.ReadableILStringToTextWriter(writer));
@@ -2389,21 +2195,6 @@ namespace Jurassic.Compiler
 
 #endif
 
-
-
-        //     MISC
-        //_________________________________________________________________________________________
-
-        /// <summary>
-        /// Does nothing.
-        /// </summary>
-        public override void NoOperation()
-        {
-            Emit1ByteOpCode(0x00, 0, 0);
-        }
-
     }
-
-#endif
 
 }

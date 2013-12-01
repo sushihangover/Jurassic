@@ -56,7 +56,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // Literals cannot have side-effects so if a return value is not expected then generate
             // nothing.
@@ -84,11 +84,10 @@ namespace Jurassic.Compiler
                 generator.BranchIfNotEqual(label1);
 
                 // sharedRegExp = Global.RegExp.Construct(source, flags)
-                EmitHelpers.LoadScriptEngine(generator);
-                generator.Call(ReflectionHelpers.ScriptEngine_RegExp);
+                generator.Call(ReflectionHelpers.Global_RegExp);
                 generator.LoadString(((RegularExpressionLiteral)this.Value).Pattern);
                 generator.LoadString(((RegularExpressionLiteral)this.Value).Flags);
-                generator.Call(ReflectionHelpers.RegExp_Construct);
+                generator.Call(ReflectionHelpers.RegExp_Construct1);
                 generator.Duplicate();
                 generator.StoreVariable(sharedRegExpVariable);
 
@@ -97,11 +96,10 @@ namespace Jurassic.Compiler
                 generator.DefineLabelPosition(label1);
 
                 // Global.RegExp.Construct(sharedRegExp, flags)
-                EmitHelpers.LoadScriptEngine(generator);
-                generator.Call(ReflectionHelpers.ScriptEngine_RegExp);
+                generator.Call(ReflectionHelpers.Global_RegExp);
                 generator.LoadVariable(sharedRegExpVariable);
                 generator.LoadNull();
-                generator.Call(ReflectionHelpers.RegExp_Construct);
+                generator.Call(ReflectionHelpers.RegExp_Construct2);
 
                 // }
                 generator.DefineLabelPosition(label2);
@@ -111,11 +109,6 @@ namespace Jurassic.Compiler
                 // Null.
                 EmitHelpers.EmitNull(generator);
             }
-            else if (this.Value == Undefined.Value)
-            {
-                // Undefined.
-                EmitHelpers.EmitUndefined(generator);
-            }
             else if (this.Value is List<Expression>)
             {
                 // Construct an array literal.
@@ -123,8 +116,7 @@ namespace Jurassic.Compiler
 
                 // Operands for ArrayConstructor.New() are: an ArrayConstructor instance (ArrayConstructor), an array (object[])
                 // ArrayConstructor
-                EmitHelpers.LoadScriptEngine(generator);
-                generator.Call(ReflectionHelpers.ScriptEngine_Array);
+                generator.Call(ReflectionHelpers.Global_Array);
 
                 // object[]
                 generator.LoadInt32(arrayLiteral.Count);
@@ -161,8 +153,7 @@ namespace Jurassic.Compiler
                 var properties = (Dictionary<string, object>)this.Value;
 
                 // Create a new object.
-                EmitHelpers.LoadScriptEngine(generator);
-                generator.Call(ReflectionHelpers.ScriptEngine_Object);
+                generator.Call(ReflectionHelpers.Global_Object);
                 generator.Call(ReflectionHelpers.Object_Construct);
 
                 foreach (var keyValuePair in properties)
@@ -177,9 +168,6 @@ namespace Jurassic.Compiler
                         // Add a new property to the object.
                         var dataPropertyValue = (Expression)propertyValue;
                         dataPropertyValue.GenerateCode(generator, optimizationInfo);
-                        // Support the inferred function displayName property.
-                        if (dataPropertyValue is FunctionExpression)
-                            ((FunctionExpression)dataPropertyValue).GenerateDisplayName(generator, optimizationInfo, propertyName, false);
                         EmitConversion.ToAny(generator, dataPropertyValue.ResultType);
                         generator.LoadBoolean(optimizationInfo.StrictMode);
                         generator.Call(ReflectionHelpers.ObjectInstance_SetPropertyValue_String);
@@ -191,8 +179,6 @@ namespace Jurassic.Compiler
                         if (accessorValue.Getter != null)
                         {
                             accessorValue.Getter.GenerateCode(generator, optimizationInfo);
-                            // Support the inferred function displayName property.
-                            accessorValue.Getter.GenerateDisplayName(generator, optimizationInfo, "get " + propertyName, true);
                             EmitConversion.ToAny(generator, accessorValue.Getter.ResultType);
                         }
                         else
@@ -200,14 +186,12 @@ namespace Jurassic.Compiler
                         if (accessorValue.Setter != null)
                         {
                             accessorValue.Setter.GenerateCode(generator, optimizationInfo);
-                            // Support the inferred function displayName property.
-                            accessorValue.Setter.GenerateDisplayName(generator, optimizationInfo, "set " + propertyName, true);
                             EmitConversion.ToAny(generator, accessorValue.Setter.ResultType);
                         }
                         else
                             generator.LoadNull();
                         generator.LoadInt32((int)Library.PropertyAttributes.FullAccess);
-                        generator.NewObject(ReflectionHelpers.PropertyDescriptor_Constructor3);
+                        generator.NewObject(ReflectionHelpers.PropertyDescriptor_Constructor);
                         generator.LoadBoolean(false);
                         generator.Call(ReflectionHelpers.ObjectInstance_DefineProperty);
                         generator.Pop();
@@ -216,8 +200,10 @@ namespace Jurassic.Compiler
                         throw new InvalidOperationException("Invalid property value type in object literal.");
                 }
             }
+            else if (PrimitiveTypeUtilities.ToPrimitiveType(this.Value.GetType()) != PrimitiveType.Undefined)
+                throw new NotImplementedException("TODO: literal values should be actual RegExps, ArrayInstances, etc.");
             else
-                throw new NotImplementedException("Unknown literal type.");
+                throw new NotImplementedException();
         }
 
         /// <summary>
@@ -279,10 +265,6 @@ namespace Jurassic.Compiler
             // RegExp literal.
             if (this.Value is RegularExpressionLiteral)
                 return this.Value.ToString();
-
-            // String literal.
-            if (this.Value is string)
-                return Library.StringInstance.Quote((string)this.Value);
 
             // Everything else.
             return TypeConverter.ToString(this.Value);

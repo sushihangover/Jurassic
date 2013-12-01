@@ -6,12 +6,8 @@ namespace Jurassic.Compiler
     /// <summary>
     /// Represents a scope where the variables are statically known.
     /// </summary>
-    [Serializable]
     public class DeclarativeScope : Scope
     {
-        // An array of values - one element for each variable declared in the scope.
-        private object[] values;
-
         /// <summary>
         /// Creates a new declarative scope for use inside a function body.
         /// </summary>
@@ -19,7 +15,7 @@ namespace Jurassic.Compiler
         /// <param name="functionName"> The name of the function.  Can be empty for an anonymous function. </param>
         /// <param name="argumentNames"> The names of each of the function arguments. </param>
         /// <returns> A new DeclarativeScope instance. </returns>
-        internal static DeclarativeScope CreateFunctionScope(Scope parentScope, string functionName, IEnumerable<string> argumentNames)
+        public static DeclarativeScope CreateFunctionScope(Scope parentScope, string functionName, IEnumerable<string> argumentNames)
         {
             if (parentScope == null)
                 throw new ArgumentNullException("parentScope", "Function scopes must have a parent scope.");
@@ -41,18 +37,12 @@ namespace Jurassic.Compiler
         /// Creates a new declarative scope for use inside a catch statement.
         /// </summary>
         /// <param name="parentScope"> A reference to the parent scope.  Can not be <c>null</c>. </param>
-        /// <param name="catchVariableName"> The name of the catch variable. </param>
         /// <returns> A new DeclarativeScope instance. </returns>
-        internal static DeclarativeScope CreateCatchScope(Scope parentScope, string catchVariableName)
+        public static DeclarativeScope CreateCatchScope(Scope parentScope)
         {
             if (parentScope == null)
-                throw new ArgumentNullException("parentScope", "Catch scopes must have a parent scope.");
-            if (catchVariableName == null)
-                throw new ArgumentNullException("catchVariableName");
-            var result = new DeclarativeScope(parentScope, 0);
-            result.DeclareVariable(catchVariableName);
-            result.CanDeclareVariables = false;    // Only the catch variable can be declared in this scope.
-            return result;
+                throw new ArgumentNullException("parentScope", "Function scopes must have a parent scope.");
+            return new DeclarativeScope(parentScope, 0);
         }
 
         /// <summary>
@@ -60,7 +50,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="parentScope"> A reference to the parent scope.  Can not be <c>null</c>. </param>
         /// <returns> A new DeclarativeScope instance. </returns>
-        internal static DeclarativeScope CreateEvalScope(Scope parentScope)
+        public static DeclarativeScope CreateEvalScope(Scope parentScope)
         {
             if (parentScope == null)
                 throw new ArgumentNullException("parentScope", "Eval scopes must have a parent scope.");
@@ -82,7 +72,7 @@ namespace Jurassic.Compiler
             var result = new DeclarativeScope(parentScope, declaredVariableNames.Length);
             foreach (string variableName in declaredVariableNames)
                 result.DeclareVariable(variableName);
-            result.values = new object[result.DeclaredVariableCount];
+            result.Values = new object[declaredVariableNames.Length];
             return result;
         }
 
@@ -103,29 +93,8 @@ namespace Jurassic.Compiler
         /// </summary>
         public object[] Values
         {
-            get { return this.values; }
-        }
-
-        /// <summary>
-        /// Declares a variable or function in this scope.  This will be initialized with the value
-        /// of the given expression.
-        /// </summary>
-        /// <param name="name"> The name of the variable. </param>
-        /// <param name="valueAtTopOfScope"> The value of the variable at the top of the scope. </param>
-        /// <param name="writable"> <c>true</c> if the variable can be modified; <c>false</c>
-        /// otherwise. </param>
-        /// <param name="deletable"> <c>true</c> if the variable can be deleted; <c>false</c>
-        /// otherwise. </param>
-        /// <returns> A reference to the variable that was declared. </returns>
-        internal override DeclaredVariable DeclareVariable(string name, Expression valueAtTopOfScope = null, bool writable = true, bool deletable = false)
-        {
-            // Variables can be added to a declarative scope using eval().  When this happens the
-            // values array needs to be resized.  That check happens here.
-            if (this.values != null && this.DeclaredVariableCount >= this.Values.Length)
-                Array.Resize(ref this.values, this.DeclaredVariableCount + 10);
-
-            // Delegate to the Scope class.
-            return base.DeclareVariable(name, valueAtTopOfScope, writable, deletable);
+            get;
+            private set;
         }
 
         /// <summary>
@@ -151,10 +120,10 @@ namespace Jurassic.Compiler
         {
             if (this.Values == null)
                 throw new InvalidOperationException("This method can only be used when the DeclarativeScope is created using CreateRuntimeScope().");
-            var variable = GetDeclaredVariable(variableName);
-            if (variable == null)
+            int index = GetDeclaredVariableIndex(variableName);
+            if (index < 0)
                 return null;
-            return this.Values[variable.Index];
+            return this.Values[index];
         }
 
         /// <summary>
@@ -166,46 +135,13 @@ namespace Jurassic.Compiler
         /// CreateRuntimeScope(). </exception>
         public override void SetValue(string variableName, object value)
         {
-            if (this.Values == null)
-                throw new InvalidOperationException("This method can only be used when the DeclarativeScope is created using CreateRuntimeScope().");
-            
-            // Get information on the variable.
-            var variable = GetDeclaredVariable(variableName);
-
-            // If the variable doesn't exist, create it.
-            if (variable == null)
-                variable = this.DeclareVariable(variableName);
-
-            // Check the variable is writable.
-            if (variable.Writable == false)
-                return;
-
-            // Set the value.
-            this.Values[variable.Index] = value;
-        }
-
-        /// <summary>
-        /// Deletes the variable from the scope.
-        /// </summary>
-        /// <param name="variableName"> The name of the variable. </param>
-        public override bool Delete(string variableName)
-        {
-            if (this.Values == null)
-                throw new InvalidOperationException("This method can only be used when the DeclarativeScope is created using CreateRuntimeScope().");
-            var variable = GetDeclaredVariable(variableName);
-
-            // Delete returns true if the variable doesn't exist.
-            if (variable == null)
-                return true;
-
-            // Check if the variable is deletable.
-            if (variable.Deletable == false)
-                return false;
-
-            // This variable can be deleted (it was declared in an eval()), remove the variable
-            // from the scope.
-            RemovedDeclaredVariable(variableName);
-            return true;
+            int index = GetDeclaredVariableIndex(variableName);
+            if (index < 0)
+            {
+                this.DeclareVariable(variableName);
+                index = GetDeclaredVariableIndex(variableName);
+            }
+            this.Values[index] = value;
         }
 
         /// <summary>
@@ -215,47 +151,28 @@ namespace Jurassic.Compiler
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
         internal override void GenerateScopeCreation(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Allocate storage for each variable if the declarative scope object has been optimized away.
-            if (optimizationInfo.OptimizeDeclarativeScopes == false)
-            {
-
-                // Create a new declarative scope.
+            // Create a new declarative scope.
             
-                // parentScope
-                EmitHelpers.LoadScope(generator);
+            // parentScope
+            generator.LoadArgument(0);
 
-                // declaredVariableNames
-                generator.LoadInt32(this.DeclaredVariableCount);
-                generator.NewArray(typeof(string));
-                int i = 0;
-                foreach (string variableName in this.DeclaredVariableNames)
-                {
-                    generator.Duplicate();
-                    generator.LoadInt32(i ++);
-                    generator.LoadString(variableName);
-                    generator.StoreArrayElement(typeof(string));
-                }
-
-                // DeclarativeScope.CreateRuntimeScope(parentScope, declaredVariableNames)
-                generator.Call(ReflectionHelpers.DeclarativeScope_CreateRuntimeScope);
-
-                // Save the new scope.
-                EmitHelpers.StoreScope(generator);
-
-            }
-            else
+            // declaredVariableNames
+            generator.LoadInt32(this.DeclaredVariableCount);
+            generator.NewArray(typeof(string));
+            int i = 0;
+            foreach (string variableName in this.DeclaredVariableNames)
             {
-
-                // The declarative scope can be optimized away entirely.
-
-                // Allocate storage for each variable.
-                foreach (var variable in this.DeclaredVariables)
-                    variable.Store = generator.DeclareVariable(typeof(object), variable.Name);
-
-                // Indicate the scope was not created.
-                this.ExistsAtRuntime = false;
-
+                generator.Duplicate();
+                generator.LoadInt32(i ++);
+                generator.LoadString(variableName);
+                generator.StoreArrayElement(typeof(string));
             }
+
+            // DeclarativeScope.CreateRuntimeScope(parentScope, declaredVariableNames)
+            generator.Call(ReflectionHelpers.DeclarativeScope_CreateRuntimeScope);
+
+            // Store the new scope in the first method parameter.
+            generator.StoreArgument(0);
         }
     }
 

@@ -47,39 +47,17 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals();
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
-
             foreach (var declaration in this.Declarations)
             {
                 if (declaration.InitExpression != null)
                 {
                     // Create a new assignment expression and generate code for it.
-                    if (optimizationInfo.DebugDocument != null)
-                        generator.MarkSequencePoint(optimizationInfo.DebugDocument, declaration.DebugInfo);
                     var initializationStatement = new ExpressionStatement(
                         new AssignmentExpression(this.Scope, declaration.VariableName, declaration.InitExpression));
                     initializationStatement.GenerateCode(generator, optimizationInfo);
                 }
-            }
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
-        }
-
-        /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
-        /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
-        {
-            get
-            {
-                foreach (var declaration in this.Declarations)
-                    if (declaration.InitExpression != null)
-                        yield return new AssignmentExpression(this.Scope, declaration.VariableName, declaration.InitExpression);
             }
         }
 
@@ -125,11 +103,6 @@ namespace Jurassic.Compiler
         /// Gets or sets the initial value of the variable.  Can be <c>null</c>.
         /// </summary>
         public Expression InitExpression { get; set; }
-
-        /// <summary>
-        /// Gets or sets the portion of source code associated with the declaration.
-        /// </summary>
-        public SourceCodeSpan DebugInfo { get; set; }
     }
 
 }

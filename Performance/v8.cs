@@ -7,95 +7,115 @@ namespace Performance
 {
 
     /// <summary>
-    /// Run the v8 performance tests.
+    /// Test the Parser object.
     /// </summary>
     [TestClass]
     public class v8
     {
-        private static ScriptEngineManager manager;
-
         [ClassInitialize]
         public static void WarmUp(TestContext context)
         {
-            manager = new ScriptEngineManager(@"..\..\..\Performance\Files\v8\", (engine) =>
-            {
-                // Replace the default random number generator with a deterministic one.
-                engine.Math["random"] = engine.Evaluate(@"
-                    (function() {
-                      var seed = 49734321;
-                      return function() {
-                        // Robert Jenkins' 32 bit integer hash function.
-                        seed = ((seed + 0x7ed55d16) + (seed << 12))  & 0xffffffff;
-                        seed = ((seed ^ 0xc761c23c) ^ (seed >>> 19)) & 0xffffffff;
-                        seed = ((seed + 0x165667b1) + (seed << 5))   & 0xffffffff;
-                        seed = ((seed + 0xd3a2646c) ^ (seed << 9))   & 0xffffffff;
-                        seed = ((seed + 0xfd7046c5) + (seed << 3))   & 0xffffffff;
-                        seed = ((seed ^ 0xb55a4f09) ^ (seed >>> 16)) & 0xffffffff;
-                        return (seed & 0xfffffff) / 0x10000000;
-                      };
-                    })();");
-
-                // Some of the tests call alert if there is an error.  Since alert is not supported,
-                // translate this into throwing an exception.
-                engine.Global["alert"] = engine.Evaluate("(function alert(str) { throw new Error(str) })");
-
-                // For debugging purposes, define the console object.
-                engine.Global["console"] = new Jurassic.Library.FirebugConsole(engine);
-
-            });
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            GlobalObject.Eval("qwerew = 1");
+            context.WriteLine("Warm up time: {0:n2}ms", timer.Elapsed.TotalMilliseconds);
         }
 
         [TestMethod]
         public void crypto()
         {
-            manager.RunTest("crypto.js", 27308.3);
+            RunTest(@"v8-crypto.js", 0);
         }
 
         [TestMethod]
         public void deltablue()
         {
-            manager.RunTest("deltablue.js", 352.3);
+            RunTest(@"v8-deltablue.js", 0);
         }
 
         [TestMethod]
         public void earley_boyer()
         {
-            // Test uses octal escape sequences.
-            manager.ScriptEngine.CompatibilityMode = Jurassic.CompatibilityMode.ECMAScript3;
-            try
-            {
-                manager.RunTest("earley-boyer.js", 27067);
-            }
-            finally
-            {
-                manager.ScriptEngine.CompatibilityMode = Jurassic.CompatibilityMode.Latest;
-            }
+            RunTest(@"v8-earley-boyer.js", 0);
         }
 
         [TestMethod]
         public void raytrace()
         {
-            manager.RunTest("raytrace.js", 2345);
+            RunTest(@"v8-raytrace.js", 13180);
         }
 
         [TestMethod]
         public void regexp()
         {
-            manager.RunTest("regexp.js", 3294);
+            RunTest(@"v8-regexp.js", 7367);
         }
 
         [TestMethod]
         public void richards()
         {
-            manager.RunTest("richards.js", 298.7);
+            RunTest(@"v8-richards.js", 0);
         }
 
         [TestMethod]
         public void splay()
         {
-            manager.RunTest(@"splay.js", 6873);
+            RunTest(@"v8-splay.js", 0);
         }
 
+        [TestMethod]
+        public void RunAllTests()
+        {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            foreach (string path in Directory.EnumerateFiles(@"..\..\..\Performance\Files\v8-v4"))
+                RunTest(path, 0, false);
+            Assert.Inconclusive(string.Format("{0}ms, was 24471ms", timer.ElapsedMilliseconds));
+        }
+
+        private void RunTest(string scriptPath, double previous, bool assertResults = true)
+        {
+            scriptPath = Path.Combine(@"..\..\..\Performance\Files\v8-v4\", scriptPath);
+            var script = File.ReadAllText(scriptPath);
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+
+            // Parse the javascript code.
+            var context = new Jurassic.Compiler.GlobalContext(new System.IO.StringReader(script), scriptPath);
+            context.Parse();
+            double parseTime = timer.Elapsed.TotalMilliseconds;
+
+            // Optimize the code.
+            timer.Restart();
+            context.Optimize();
+            double optimizationTime = timer.Elapsed.TotalMilliseconds;
+
+            // Compile the code.
+            timer.Restart();
+            context.GenerateCode();
+            double compilationTime = timer.Elapsed.TotalMilliseconds;
+
+            // Run the javascript code.
+            timer.Restart();
+            context.Execute();
+            double runTime = timer.Elapsed.TotalMilliseconds;
+
+            string infoString = string.Format("{0:n1}ms (parse: {1:n1}ms, compile: {2:n1}ms, optimize: {3:n1}ms, runtime: {4:n1}ms)",
+                parseTime + compilationTime + runTime,
+                parseTime,
+                compilationTime,
+                optimizationTime,
+                runTime);
+            if (previous > 0)
+                infoString += string.Format(", was {0:n1}ms", previous);
+            //Console.WriteLine("{0}: {1}", Path.GetFileNameWithoutExtension(scriptPath), infoString);
+            Console.WriteLine("{0}\t{1:n1}\t{2:n1}\t{3:n1}\t{4:n1}\t{5:n1}",
+                Path.GetFileNameWithoutExtension(scriptPath),
+                parseTime,
+                compilationTime,
+                optimizationTime,
+                runTime,
+                parseTime + compilationTime + runTime);
+            if (assertResults == true)
+                throw new AssertInconclusiveException(infoString);
+        }
     }
 
 }

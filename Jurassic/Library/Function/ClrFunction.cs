@@ -9,10 +9,9 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents a JavaScript function implemented by one or more .NET methods.
     /// </summary>
-    [Serializable]
     public class ClrFunction : FunctionInstance
     {
-        object thisBinding;
+        bool bindThis;
         private FunctionBinder callBinder;
         private FunctionBinder constructBinder;
 
@@ -20,7 +19,7 @@ namespace Jurassic.Library
         //     INITIALIZATION
         //_________________________________________________________________________________________
 
-        /// <summary>
+                /// <summary>
         /// Creates a new instance of a built-in constructor function.
         /// </summary>
         /// <param name="prototype"> The next object in the prototype chain. </param>
@@ -35,7 +34,7 @@ namespace Jurassic.Library
                 throw new ArgumentNullException("instancePrototype");
 
             // This is a constructor so ignore the "this" parameter when the function is called.
-            thisBinding = this;
+            bindThis = true;
 
             // Search through every method in this type looking for [JSFunction] attributes.
             var callBinderMethods = new List<FunctionBinderMethod>(1);
@@ -77,7 +76,7 @@ namespace Jurassic.Library
             if (constructBinderMethods.Count > 0)
                 this.constructBinder = new FunctionBinder(constructBinderMethods);
             else
-                this.constructBinder = new FunctionBinder(new FunctionBinderMethod(new Func<ObjectInstance>(() => this.Engine.Object.Construct()).Method));
+                this.constructBinder = new FunctionBinder(new FunctionBinderMethod(new Func<ObjectInstance>(() => GlobalObject.Object.Construct()).Method));
 
             // Add function properties.
             this.FastSetProperty("name", name);
@@ -95,21 +94,18 @@ namespace Jurassic.Library
         /// delegate for the function name. </param>
         /// <param name="length"> The "typical" number of arguments expected by the function.  Pass
         /// <c>-1</c> to use the number of arguments expected by the delegate. </param>
-        internal ClrFunction(ObjectInstance prototype, Delegate delegateToCall, string name = null, int length = -1)
+        public ClrFunction(ObjectInstance prototype, Delegate delegateToCall, string name = null, int length = -1)
             : base(prototype)
         {
             // Initialize the [[Call]] method.
             var binderMethod = new FunctionBinderMethod(delegateToCall.Method);
             this.callBinder = new FunctionBinder(new FunctionBinderMethod(delegateToCall.Method));
 
-            // If the delegate has a class instance, use that to call the method.
-            this.thisBinding = delegateToCall.Target;
-
             // Add function properties.
             this.FastSetProperty("name", name != null ? name : binderMethod.Name);
             this.FastSetProperty("length", length >= 0 ? length : binderMethod.ParameterCount);
-            //this.FastSetProperty("prototype", this.Engine.Object.Construct());
-            //this.InstancePrototype.FastSetProperty("constructor", this, PropertyAttributes.NonEnumerable);
+            this.FastSetProperty("prototype", GlobalObject.Object.Construct());
+            this.InstancePrototype.FastSetProperty("constructor", this, PropertyAttributes.NonEnumerable);
         }
 
         /// <summary>
@@ -123,7 +119,7 @@ namespace Jurassic.Library
         /// the same name). </param>
         /// <param name="length"> The "typical" number of arguments expected by the function.  Pass
         /// <c>-1</c> to use the maximum of arguments expected by any of the provided methods. </param>
-        internal ClrFunction(ObjectInstance prototype, IEnumerable<FunctionBinderMethod> methods, string name = null, int length = -1)
+        public ClrFunction(ObjectInstance prototype, IEnumerable<FunctionBinderMethod> methods, string name = null, int length = -1)
             : base(prototype)
         {
             this.callBinder = new FunctionBinder(methods);
@@ -140,8 +136,8 @@ namespace Jurassic.Library
             // Add function properties.
             this.FastSetProperty("name", name);
             this.FastSetProperty("length", length >= 0 ? length : methods.Max(bm => bm.ParameterCount));
-            //this.FastSetProperty("prototype", this.Engine.Object.Construct());
-            //this.InstancePrototype.FastSetProperty("constructor", this, PropertyAttributes.NonEnumerable);
+            this.FastSetProperty("prototype", GlobalObject.Object.Construct());
+            this.InstancePrototype.FastSetProperty("constructor", this, PropertyAttributes.NonEnumerable);
         }
 
         
@@ -157,15 +153,7 @@ namespace Jurassic.Library
         /// <returns> The value that was returned from the function. </returns>
         public override object CallLateBound(object thisObject, params object[] arguments)
         {
-            if (this.Engine.CompatibilityMode == CompatibilityMode.ECMAScript3)
-            {
-                // Convert null or undefined to the global object.
-                if (TypeUtilities.IsUndefined(thisObject) == true || thisObject == Null.Value)
-                    thisObject = this.Engine.Global;
-                else
-                    thisObject = TypeConverter.ToObject(this.Engine, thisObject);
-            }
-            return this.callBinder.Call(this.Engine, thisBinding != null ? thisBinding : thisObject, arguments);
+            return this.callBinder.Call(bindThis == true ? this : thisObject, arguments);
         }
 
         /// <summary>
@@ -176,8 +164,8 @@ namespace Jurassic.Library
         public override ObjectInstance ConstructLateBound(params object[] argumentValues)
         {
             if (this.constructBinder == null)
-                throw new JavaScriptException(this.Engine, "TypeError", "Objects cannot be constructed from built-in functions");
-            return (ObjectInstance)this.constructBinder.Call(this.Engine, this, argumentValues);
+                return GlobalObject.Object.Construct();
+            return (ObjectInstance)this.constructBinder.Call(this, argumentValues);
         }
 
         /// <summary>

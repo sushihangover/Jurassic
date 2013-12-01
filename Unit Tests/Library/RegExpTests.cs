@@ -25,17 +25,13 @@ namespace UnitTests
             Assert.AreEqual(2, TestUtils.Evaluate("RegExp.length"));
 
             // for-in
-            Assert.AreEqual("$1,$2,$3,$4,$5,$6,$7,$8,$9,input,lastMatch,lastParen,leftContext,rightContext", TestUtils.Evaluate("y = []; for (var x in RegExp) { y.push(x) } y.sort().toString()"));
-            Assert.AreEqual("", TestUtils.Evaluate("y = []; for (var x in new RegExp('abc', 'g')) { y.push(x) } y.sort().toString()"));
+            Assert.AreEqual("", TestUtils.Evaluate("y = ''; for (var x in RegExp) { if (y != '') y += ','; y += x } y"));
+            Assert.AreEqual("", TestUtils.Evaluate("y = ''; for (var x in new RegExp('abc', 'g')) { if (y != '') y += ','; y += x } y"));
         }
 
         [TestMethod]
         public void Call()
         {
-            // RegExp
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp().source"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp(undefined).source"));
-
             // RegExp(pattern)
             TestUtils.Evaluate("var x = RegExp('abc')");
             Assert.AreEqual("abc", TestUtils.Evaluate("x.source"));
@@ -69,10 +65,6 @@ namespace UnitTests
         [TestMethod]
         public void Construction()
         {
-            // new RegExp()
-            Assert.AreEqual("", TestUtils.Evaluate("new RegExp().source"));
-            Assert.AreEqual("", TestUtils.Evaluate("new RegExp(undefined).source"));
-
             // new RegExp(pattern)
             TestUtils.Evaluate("var x = new RegExp('abc')");
             Assert.AreEqual("abc", TestUtils.Evaluate("x.source"));
@@ -101,12 +93,6 @@ namespace UnitTests
             // new RegExp(regExp, flags)
             Assert.AreEqual(TestUtils.Engine == JSEngine.JScript ? "RegExpError" : "TypeError",
                 TestUtils.EvaluateExceptionType("new RegExp(new RegExp('abc', 'g'), 'i')"));
-            Assert.AreEqual("abc", TestUtils.Evaluate("new RegExp(/abc/, undefined).source"));
-
-            // Flags must be known and unique.
-            Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("new RegExp('abc', 'gg')"));
-            Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("new RegExp('abc', 'igi')"));
-            Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("new RegExp('abc', 'a')"));
         }
 
         [TestMethod]
@@ -239,53 +225,6 @@ namespace UnitTests
             TestUtils.Evaluate("x.lastIndex = 7");
             TestUtils.Evaluate("x.exec('helloabchello')");
             Assert.AreEqual(TestUtils.Engine == JSEngine.JScript ? 8 : 7, TestUtils.Evaluate("x.lastIndex"));
-
-            // Test the deprecated RegExp properties.
-            TestUtils.Evaluate("/li(..)le/.exec('santas little reindeers')");
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp.$1"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$2"));
-            Assert.AreEqual("santas little reindeers", TestUtils.Evaluate("RegExp.input"));
-            Assert.AreEqual("santas little reindeers", TestUtils.Evaluate("RegExp.$_"));
-            Assert.AreEqual("little", TestUtils.Evaluate("RegExp.lastMatch"));
-            Assert.AreEqual("little", TestUtils.Evaluate("RegExp['$&']"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp.lastParen"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp['$+']"));
-            Assert.AreEqual("santas ", TestUtils.Evaluate("RegExp.leftContext"));
-            Assert.AreEqual("santas ", TestUtils.Evaluate("RegExp['$`']"));
-            Assert.AreEqual(" reindeers", TestUtils.Evaluate("RegExp.rightContext"));
-            Assert.AreEqual(" reindeers", TestUtils.Evaluate("RegExp[\"$'\"]"));
-
-            TestUtils.Evaluate("/(li|re)(in)?(tt|deer)/.exec('santas little reindeers')");
-            Assert.AreEqual("li", TestUtils.Evaluate("RegExp.$1"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$2"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp.$3"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$4"));
-            Assert.AreEqual("santas little reindeers", TestUtils.Evaluate("RegExp.input"));
-            Assert.AreEqual("santas little reindeers", TestUtils.Evaluate("RegExp.$_"));
-            Assert.AreEqual("litt", TestUtils.Evaluate("RegExp.lastMatch"));
-            Assert.AreEqual("litt", TestUtils.Evaluate("RegExp['$&']"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp.lastParen"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp['$+']"));
-            Assert.AreEqual("santas ", TestUtils.Evaluate("RegExp.leftContext"));
-            Assert.AreEqual("santas ", TestUtils.Evaluate("RegExp['$`']"));
-            Assert.AreEqual("le reindeers", TestUtils.Evaluate("RegExp.rightContext"));
-            Assert.AreEqual("le reindeers", TestUtils.Evaluate("RegExp[\"$'\"]"));
-
-            TestUtils.Evaluate("/nomatch/.exec('santas little reindeers')");
-            Assert.AreEqual("li", TestUtils.Evaluate("RegExp.$1"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$2"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp.$3"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$4"));
-            Assert.AreEqual("santas little reindeers", TestUtils.Evaluate("RegExp.input"));
-            Assert.AreEqual("santas little reindeers", TestUtils.Evaluate("RegExp.$_"));
-            Assert.AreEqual("litt", TestUtils.Evaluate("RegExp.lastMatch"));
-            Assert.AreEqual("litt", TestUtils.Evaluate("RegExp['$&']"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp.lastParen"));
-            Assert.AreEqual("tt", TestUtils.Evaluate("RegExp['$+']"));
-            Assert.AreEqual("santas ", TestUtils.Evaluate("RegExp.leftContext"));
-            Assert.AreEqual("santas ", TestUtils.Evaluate("RegExp['$`']"));
-            Assert.AreEqual("le reindeers", TestUtils.Evaluate("RegExp.rightContext"));
-            Assert.AreEqual("le reindeers", TestUtils.Evaluate("RegExp[\"$'\"]"));
         }
 
         [TestMethod]
@@ -312,76 +251,45 @@ namespace UnitTests
             TestUtils.Evaluate("x.lastIndex = 7");
             Assert.AreEqual(true, TestUtils.Evaluate("x.test('helloabchello')"));
             Assert.AreEqual(TestUtils.Engine == JSEngine.JScript ? 8 : 7, TestUtils.Evaluate("x.lastIndex"));
-
-            // Test the deprecated RegExp properties.
-            TestUtils.Evaluate("/te(..)(s|i)/.test('terrible teens')");
-            Assert.AreEqual("rr", TestUtils.Evaluate("RegExp.$1"));
-            Assert.AreEqual("i", TestUtils.Evaluate("RegExp.$2"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$3"));
-            Assert.AreEqual("terrible teens", TestUtils.Evaluate("RegExp.input"));
-            Assert.AreEqual("terrible teens", TestUtils.Evaluate("RegExp.$_"));
-            Assert.AreEqual("terri", TestUtils.Evaluate("RegExp.lastMatch"));
-            Assert.AreEqual("terri", TestUtils.Evaluate("RegExp['$&']"));
-            Assert.AreEqual("i", TestUtils.Evaluate("RegExp.lastParen"));
-            Assert.AreEqual("i", TestUtils.Evaluate("RegExp['$+']"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.leftContext"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp['$`']"));
-            Assert.AreEqual("ble teens", TestUtils.Evaluate("RegExp.rightContext"));
-            Assert.AreEqual("ble teens", TestUtils.Evaluate("RegExp[\"$'\"]"));
-
-            TestUtils.Evaluate("/notamatch/.test('my little friend')");
-            Assert.AreEqual("rr", TestUtils.Evaluate("RegExp.$1"));
-            Assert.AreEqual("i", TestUtils.Evaluate("RegExp.$2"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$3"));
-            Assert.AreEqual("terrible teens", TestUtils.Evaluate("RegExp.input"));
-            Assert.AreEqual("terrible teens", TestUtils.Evaluate("RegExp.$_"));
-            Assert.AreEqual("terri", TestUtils.Evaluate("RegExp.lastMatch"));
-            Assert.AreEqual("terri", TestUtils.Evaluate("RegExp['$&']"));
-            Assert.AreEqual("i", TestUtils.Evaluate("RegExp.lastParen"));
-            Assert.AreEqual("i", TestUtils.Evaluate("RegExp['$+']"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp.leftContext"));
-            Assert.AreEqual("", TestUtils.Evaluate("RegExp['$`']"));
-            Assert.AreEqual("ble teens", TestUtils.Evaluate("RegExp.rightContext"));
-            Assert.AreEqual("ble teens", TestUtils.Evaluate("RegExp[\"$'\"]"));
         }
 
-        //[TestMethod]
-        //public void RegExpProperties()
-        //{
-        //    // exec() that does not match should not change the global RegExp properties.
-        //    TestUtils.Evaluate("RegExp.input = 'before'");
-        //    TestUtils.Evaluate("/test/.exec('string that does not match')");
-        //    Assert.AreEqual("before", TestUtils.Evaluate("RegExp.input"));
+        [TestMethod]
+        public void RegExpProperties()
+        {
+            // exec() that does not match should not change the global RegExp properties.
+            TestUtils.Evaluate("RegExp.input = 'before'");
+            TestUtils.Evaluate("/test/.exec('string that does not match')");
+            Assert.AreEqual("before", TestUtils.Evaluate("RegExp.input"));
 
-        //    // exec() that does match does change the global RegExp properties.
-        //    TestUtils.Evaluate("RegExp.input = '1'");
-        //    TestUtils.Evaluate("/(ex)(ec|ex)/.exec('for exec testing')");
-        //    Assert.AreEqual("for exec testing", TestUtils.Evaluate("RegExp.input"));
-        //    Assert.AreEqual("exec", TestUtils.Evaluate("RegExp.lastMatch"));
-        //    Assert.AreEqual("ec", TestUtils.Evaluate("RegExp.lastParen"));
-        //    Assert.AreEqual("for ", TestUtils.Evaluate("RegExp.leftContext"));
-        //    Assert.AreEqual(" testing", TestUtils.Evaluate("RegExp.rightContext"));
-        //    Assert.AreEqual("ex", TestUtils.Evaluate("RegExp.$1"));
-        //    Assert.AreEqual("ec", TestUtils.Evaluate("RegExp.$2"));
-        //    Assert.AreEqual("", TestUtils.Evaluate("RegExp.$3"));
+            // exec() that does match does change the global RegExp properties.
+            TestUtils.Evaluate("RegExp.input = '1'");
+            TestUtils.Evaluate("/(ex)(ec|ex)/.exec('for exec testing')");
+            Assert.AreEqual("for exec testing", TestUtils.Evaluate("RegExp.input"));
+            Assert.AreEqual("exec", TestUtils.Evaluate("RegExp.lastMatch"));
+            Assert.AreEqual("ec", TestUtils.Evaluate("RegExp.lastParen"));
+            Assert.AreEqual("for ", TestUtils.Evaluate("RegExp.leftContext"));
+            Assert.AreEqual(" testing", TestUtils.Evaluate("RegExp.rightContext"));
+            Assert.AreEqual("ex", TestUtils.Evaluate("RegExp.$1"));
+            Assert.AreEqual("ec", TestUtils.Evaluate("RegExp.$2"));
+            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$3"));
 
-        //    // test() that does not match should not change the global RegExp properties.
-        //    TestUtils.Evaluate("RegExp.input = 'before'");
-        //    TestUtils.Evaluate("/test/.test('string that does not match')");
-        //    Assert.AreEqual("before", TestUtils.Evaluate("RegExp.input"));
+            // test() that does not match should not change the global RegExp properties.
+            TestUtils.Evaluate("RegExp.input = 'before'");
+            TestUtils.Evaluate("/test/.test('string that does not match')");
+            Assert.AreEqual("before", TestUtils.Evaluate("RegExp.input"));
 
-        //    // test() that does match does change the global RegExp properties.
-        //    TestUtils.Evaluate("RegExp.input = 'before'");
-        //    TestUtils.Evaluate("/(te)(st|mp)/.test('for testing')");
-        //    Assert.AreEqual("for testing", TestUtils.Evaluate("RegExp.input"));
-        //    Assert.AreEqual("test", TestUtils.Evaluate("RegExp.lastMatch"));
-        //    Assert.AreEqual("st", TestUtils.Evaluate("RegExp.lastParen"));
-        //    Assert.AreEqual("for ", TestUtils.Evaluate("RegExp.leftContext"));
-        //    Assert.AreEqual("ing", TestUtils.Evaluate("RegExp.rightContext"));
-        //    Assert.AreEqual("te", TestUtils.Evaluate("RegExp.$1"));
-        //    Assert.AreEqual("st", TestUtils.Evaluate("RegExp.$2"));
-        //    Assert.AreEqual("", TestUtils.Evaluate("RegExp.$3"));
-        //}
+            // test() that does match does change the global RegExp properties.
+            TestUtils.Evaluate("RegExp.input = 'before'");
+            TestUtils.Evaluate("/(te)(st|mp)/.test('for testing')");
+            Assert.AreEqual("for testing", TestUtils.Evaluate("RegExp.input"));
+            Assert.AreEqual("test", TestUtils.Evaluate("RegExp.lastMatch"));
+            Assert.AreEqual("st", TestUtils.Evaluate("RegExp.lastParen"));
+            Assert.AreEqual("for ", TestUtils.Evaluate("RegExp.leftContext"));
+            Assert.AreEqual("ing", TestUtils.Evaluate("RegExp.rightContext"));
+            Assert.AreEqual("te", TestUtils.Evaluate("RegExp.$1"));
+            Assert.AreEqual("st", TestUtils.Evaluate("RegExp.$2"));
+            Assert.AreEqual("", TestUtils.Evaluate("RegExp.$3"));
+        }
 
         [TestMethod]
         public void NonParticipatingGroups()

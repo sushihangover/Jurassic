@@ -25,8 +25,6 @@ namespace Jurassic.Compiler
             get;
         }
     }
-
-#if !SILVERLIGHT
     
     /// <summary>
     /// Represents a local variable in CIL code.
@@ -89,8 +87,6 @@ namespace Jurassic.Compiler
             private set;
         }
     }
-
-#endif
 
     /// <summary>
     /// Represents a local variable in CIL code.

@@ -40,41 +40,25 @@ namespace Jurassic.Compiler
         /// </summary>
         public Expression InitExpression
         {
-            get { return (this.InitStatement is ExpressionStatement) == true ? ((ExpressionStatement)this.InitStatement).Expression : null; }
+            get { return (this.InitStatement is ExpressionStatement) == false ? null : ((ExpressionStatement)this.InitStatement).Expression; }
         }
 
         /// <summary>
-        /// Gets or sets the statement that checks whether the loop should terminate.
-        /// </summary>
-        public ExpressionStatement ConditionStatement
-        {
-            get;
-            set;
-        }
-
-        /// <summary>
-        /// Gets the expression that checks whether the loop should terminate.
+        /// Gets or sets the expression that checks whether the loop should terminate.
         /// </summary>
         public Expression Condition
         {
-            get { return this.ConditionStatement.Expression; }
-        }
-
-        /// <summary>
-        /// Gets or sets the statement that increments (or decrements) the loop variable.
-        /// </summary>
-        public ExpressionStatement IncrementStatement
-        {
             get;
             set;
         }
 
         /// <summary>
-        /// Gets the expression that increments (or decrements) the loop variable.
+        /// Gets or sets the expression that increments (or decrements) the loop variable.
         /// </summary>
         public Expression Increment
         {
-            get { return this.IncrementStatement.Expression; }
+            get;
+            set;
         }
 
         /// <summary>
@@ -95,11 +79,112 @@ namespace Jurassic.Compiler
             get { return false; }
         }
 
-        private struct RevertInfo
-        {
-            public PrimitiveType Type;
-            public ILLocalVariable Variable;
-        }
+        //private Dictionary<NameExpression, PrimitiveType> typeHints;
+
+        ///// <summary>
+        ///// Optimizes the expression tree.
+        ///// </summary>
+        //public override void Optimize()
+        //{
+        //    // Find the types of all the references inside the loop.
+        //    this.typeHints = new Dictionary<NameExpression, PrimitiveType>();
+        //    FindTypeHints(this.Body);
+
+        //    // Special case for the common case of an incrementing or decrementing loop variable.
+        //    // The loop must be one of the following forms:
+        //    //     for (var i = <int>; i < <int>; i ++)
+        //    //     for (var i = <int>; i < <int>; ++ i)
+        //    //     for (var i = <int>; i <= <int>; i ++)
+        //    //     for (var i = <int>; i <= <int>; ++ i)
+        //    //     for (i = <int>; i < <int>; i ++)
+        //    //     for (i = <int>; i < <int>; ++ i)
+        //    //     for (i = <int>; i < <int>; i ++)
+        //    //     for (i = <int>; i < <int>; ++ i)
+        //    // Additionally, the loop variable must not be modified inside the loop body.
+        //    NameExpression loopVariable = null;
+        //    bool loopVariableIsInteger = false;
+        //    if (this.Increment != null && this.Increment is AssignmentExpression)
+        //        loopVariable = ((AssignmentExpression)this.Increment).Target as NameExpression;
+        //    if (loopVariable != null && loopVariable.Scope is DeclarativeScope && this.typeHints.ContainsKey(loopVariable) == false)
+        //    {
+        //        bool initIsOkay = false;
+        //        if (this.InitExpression != null)
+        //        {
+        //            initIsOkay = this.InitExpression is AssignmentExpression &&
+        //                object.Equals(((AssignmentExpression)InitExpression).Target, loopVariable) == true &&
+        //                this.InitExpression.ResultType == PrimitiveType.Int32;
+        //        }
+        //        else if (this.InitVarStatement != null)
+        //        {
+        //            initIsOkay = this.InitVarStatement.Declarations.Count == 1 &&
+        //                object.Equals(new NameExpression(this.InitVarStatement.Scope, this.InitVarStatement.Declarations[0].VariableName), loopVariable) == true &&
+        //                this.InitVarStatement.Declarations[0].InitExpression.ResultType == PrimitiveType.Int32;
+        //        }
+        //        bool conditionIsOkay = this.Condition is BinaryExpression &&
+        //            (((BinaryExpression)this.Condition).Operator.Type == OperatorType.LessThan ||
+        //            ((BinaryExpression)this.Condition).Operator.Type == OperatorType.LessThanOrEqual) &&
+        //            object.Equals(((AssignmentExpression)this.Increment).Target, loopVariable) == true;
+        //        bool incrementIsOkay = this.Increment is AssignmentExpression &&
+        //            (((AssignmentExpression)this.Increment).Operator.Type == OperatorType.PostIncrement ||
+        //            ((AssignmentExpression)this.Increment).Operator.Type == OperatorType.PreIncrement);
+        //        loopVariableIsInteger = initIsOkay && conditionIsOkay && incrementIsOkay;
+        //    }
+
+        //    if (loopVariableIsInteger == true)
+        //    {
+        //        // The loop variable is an integer.
+        //        this.typeHints.Add(loopVariable, PrimitiveType.Int32);
+        //    }
+        //    else
+        //    {
+        //        // Find the rest of the references inside the loop.
+        //        FindTypeHints(this.ConditionStatement);
+        //        FindTypeHints(this.IncrementStatement);
+        //    }
+
+        //    // Optimize the child statements.
+        //    base.Optimize();
+        //}
+
+        //private void FindTypeHints(Statement statementToSearch)
+        //{
+        //    statementToSearch.Visit(statement =>
+        //    {
+        //        if (statement is ExpressionStatement)
+        //            ((ExpressionStatement)statement).Expression.Visit(expression =>
+        //                {
+        //                    if (expression is AssignmentExpression)
+        //                    {
+        //                        var target = ((AssignmentExpression)expression).Target;
+        //                        if (target is NameExpression && ((NameExpression)target).Scope is DeclarativeScope)
+        //                            AddTypeHint((NameExpression)target, ((AssignmentExpression)expression).ResultType);
+        //                    }
+        //                });
+        //    });
+        //}
+
+        ///// <summary>
+        ///// Adds information about a reference inside the loop.
+        ///// </summary>
+        ///// <param name="reference"> The reference. </param>
+        ///// <param name="typeHint"> The current type for the reference. </param>
+        //private void AddTypeHint(NameExpression reference, PrimitiveType typeHint)
+        //{
+        //    PrimitiveType existingHint;
+        //    if (this.typeHints.TryGetValue(reference, out existingHint) == false)
+        //    {
+        //        this.typeHints.Add(reference, typeHint);
+        //    }
+        //    else
+        //    {
+        //        if (existingHint == typeHint)
+        //            return;
+        //        if (PrimitiveTypeUtilities.IsNumeric(existingHint) == true && PrimitiveTypeUtilities.IsNumeric(existingHint) == true)
+        //            this.typeHints[reference] = PrimitiveType.Number;
+        //        else
+        //            this.typeHints[reference] = PrimitiveType.Any;
+        //    }
+        //}
 
         /// <summary>
         /// Generates CIL for the statement.
@@ -108,10 +193,6 @@ namespace Jurassic.Compiler
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
         public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals() { NonDefaultBreakStatementBehavior = true, NonDefaultDebugInfoBehavior = true };
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
-
             // <initializer>
             // if (<condition>)
             // {
@@ -139,10 +220,8 @@ namespace Jurassic.Compiler
                 this.InitStatement.GenerateCode(generator, optimizationInfo);
 
             // Check the condition and jump to the end if it is false.
-            if (this.CheckConditionAtEnd == false && this.ConditionStatement != null)
+            if (this.CheckConditionAtEnd == false && this.Condition != null)
             {
-                if (optimizationInfo.DebugDocument != null)
-                    generator.MarkSequencePoint(optimizationInfo.DebugDocument, this.ConditionStatement.DebugInfo);
                 this.Condition.GenerateCode(generator, optimizationInfo);
                 EmitConversion.ToBool(generator, this.Condition.ResultType);
                 generator.BranchIfFalse(breakTarget1);
@@ -154,58 +233,54 @@ namespace Jurassic.Compiler
             optimizationInfo.PopBreakOrContinueInfo();
 
             // Increment the loop variable.
-            if (this.IncrementStatement != null)
-                this.IncrementStatement.GenerateCode(generator, optimizationInfo);
+            if (this.Increment != null)
+            {
+                this.Increment.GenerateCode(generator, optimizationInfo);
+                generator.Pop();
+            }
 
             // Strengthen the variable types.
-            List<KeyValuePair<Scope.DeclaredVariable, RevertInfo>> previousVariableTypes = null;
-            if (optimizationInfo.OptimizeInferredTypes == true)
-            {
-                // Keep a record of the variable types before strengthening.
-                previousVariableTypes = new List<KeyValuePair<Scope.DeclaredVariable, RevertInfo>>();
+            //List<Tuple<VariableInfo, VariableInfo>> revertVariableInfo = null;
+            //if (this.typeHints != null)
+            //{
+            //    revertVariableInfo = new List<Tuple<VariableInfo, VariableInfo>>();
+            //    foreach (var referenceAndTypeHint in typeHints)
+            //    {
+            //        var reference = referenceAndTypeHint.Key;
+            //        var typeHint = referenceAndTypeHint.Value;
 
-                var typedVariables = FindTypedVariables();
-                foreach (var variableAndType in typedVariables)
-                {
-                    var variable = variableAndType.Key;
-                    var variableInfo = variableAndType.Value;
-                    if (variableInfo.Conditional == false && variableInfo.Type != variable.Type)
-                    {
-                        // Save the previous type so we can restore it later.
-                        var previousType = variable.Type;
-                        previousVariableTypes.Add(new KeyValuePair<Scope.DeclaredVariable, RevertInfo>(variable, new RevertInfo() { Type = previousType, Variable = variable.Store }));
+            //        var variableInfo = reference.Scope.GetVariableInfo(reference.Name);
+            //        if (variableInfo != null)
+            //        {
+            //            // Make sure we can revert the type information afterwards.
+            //            revertVariableInfo.Add(Tuple.Create(variableInfo, variableInfo.Clone()));
 
-                        // Load the existing value.
-                        var nameExpression = new NameExpression(variable.Scope, variable.Name);
-                        nameExpression.GenerateGet(generator, optimizationInfo, false);
+            //            // Create a new variable and store the value in it.
+            //            reference.GenerateGet(generator, optimizationInfo);
+            //            var local = generator.DeclareVariable(PrimitiveTypeUtilities.ToType(typeHint));
+            //            EmitConversion.Convert(generator, variableInfo.Type, typeHint);
+            //            generator.StoreVariable(local);
 
-                        // Store the typed value.
-                        variable.Store = generator.DeclareVariable(variableInfo.Type);
-                        variable.Type = variableInfo.Type;
-                        nameExpression.GenerateSet(generator, optimizationInfo, previousType, false);
-                    }
-                }
-
-                // The variables must be reverted even in the presence of exceptions.
-                if (previousVariableTypes.Count > 0)
-                    generator.BeginExceptionBlock();
-            }
+            //            // Alter the type information in the scope.
+            //            variableInfo.Type = typeHint;
+            //            variableInfo.ILVariable = local;
+            //        }
+            //    }
+            //}
 
             // The inner loop starts here.
             var startOfLoop = generator.DefineLabelPosition();
 
             // Check the condition and jump to the end if it is false.
-            if (this.ConditionStatement != null)
+            if (this.Condition != null)
             {
-                if (optimizationInfo.DebugDocument != null)
-                    generator.MarkSequencePoint(optimizationInfo.DebugDocument, this.ConditionStatement.DebugInfo);
                 this.Condition.GenerateCode(generator, optimizationInfo);
                 EmitConversion.ToBool(generator, this.Condition.ResultType);
                 generator.BranchIfFalse(breakTarget2);
             }
 
             // Emit the loop body.
-            optimizationInfo.PushBreakOrContinueInfo(this.Labels, breakTarget2, continueTarget, labelledOnly: false);
+            optimizationInfo.PushBreakOrContinueInfo(this.Labels, breakTarget2, continueTarget, false);
             this.Body.GenerateCode(generator, optimizationInfo);
             optimizationInfo.PopBreakOrContinueInfo();
 
@@ -213,8 +288,11 @@ namespace Jurassic.Compiler
             generator.DefineLabelPosition(continueTarget);
 
             // Increment the loop variable.
-            if (this.IncrementStatement != null)
-                this.IncrementStatement.GenerateCode(generator, optimizationInfo);
+            if (this.Increment != null)
+            {
+                this.Increment.GenerateCode(generator, optimizationInfo);
+                generator.Pop();
+            }
 
             // Unconditionally branch back to the start of the loop.
             generator.Branch(startOfLoop);
@@ -223,238 +301,19 @@ namespace Jurassic.Compiler
             generator.DefineLabelPosition(breakTarget2);
 
             // Revert the variable types.
-            if (previousVariableTypes != null && previousVariableTypes.Count > 0)
-            {
-                // Revert the variable types within a finally block.
-                generator.BeginFinallyBlock();
-
-                foreach (var previousVariableAndType in previousVariableTypes)
-                {
-                    var variable = previousVariableAndType.Key;
-                    var variableRevertInfo = previousVariableAndType.Value;
-
-                    // Load the existing value.
-                    var nameExpression = new NameExpression(variable.Scope, variable.Name);
-                    nameExpression.GenerateGet(generator, optimizationInfo, false);
-
-                    // Store the typed value.
-                    var previousType = variable.Type;
-                    variable.Store = variableRevertInfo.Variable;
-                    variable.Type = variableRevertInfo.Type;
-                    nameExpression.GenerateSet(generator, optimizationInfo, previousType, false);
-                }
-
-                // End the exception block.
-                generator.EndExceptionBlock();
-            }
+            //if (revertVariableInfo != null)
+            //{
+            //    foreach (var currentAndPrevious in revertVariableInfo)
+            //    {
+            //        var current = currentAndPrevious.Item1;
+            //        var previous = currentAndPrevious.Item2;
+            //        current.Type = previous.Type;
+            //        current.ILVariable = previous.ILVariable;
+            //    }
+            //}
 
             // Define the end of the loop (actually just after).
             generator.DefineLabelPosition(breakTarget1);
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
-        }
-
-        private struct InferredTypeInfo
-        {
-            // The inferred type of the variable.
-            public PrimitiveType Type;
-
-            // <c>true</c> if all the variable assignments are conditional (type inference cannot
-            // be used in this case).
-            public bool Conditional;
-        }
-
-        /// <summary>
-        /// Finds variables that were assigned to and determines their types.
-        /// </summary>
-        /// <param name="root"> The root of the abstract syntax tree to search. </param>
-        /// <param name="variableTypes"> A dictionary containing the variables that were assigned to. </param>
-        private Dictionary<Scope.DeclaredVariable, InferredTypeInfo> FindTypedVariables()
-        {
-            var result = new Dictionary<Scope.DeclaredVariable, InferredTypeInfo>();
-
-            // Special case for the common case of an incrementing or decrementing loop variable.
-            // The loop must be one of the following forms:
-            //     for (var i = <int>; i < <int>; i ++)
-            //     for (var i = <int>; i < <int>; ++ i)
-            //     for (var i = <int>; i > <int>; i --)
-            //     for (var i = <int>; i > <int>; -- i)
-            //     for (i = <int>; i < <int>; i ++)
-            //     for (i = <int>; i < <int>; ++ i)
-            //     for (i = <int>; i > <int>; i --)
-            //     for (i = <int>; i > <int>; -- i)
-            Scope loopVariableScope = null;
-            string loopVariableName = null;
-
-            // First, check the init statement.
-            bool initIsOkay = false;
-            if (this.InitVarStatement != null &&
-                this.InitVarStatement.Declarations.Count == 1 &&
-                this.InitVarStatement.Declarations[0].InitExpression != null &&
-                this.InitVarStatement.Declarations[0].InitExpression.ResultType == PrimitiveType.Int32)
-            {
-                // for (var i = <int>; ?; ?)
-                loopVariableScope = this.InitVarStatement.Scope;
-                loopVariableName = this.InitVarStatement.Declarations[0].VariableName;
-                initIsOkay = loopVariableScope is DeclarativeScope && loopVariableScope.HasDeclaredVariable(loopVariableName) == true;
-            }
-            else if (this.InitExpression != null &&
-                this.InitExpression is AssignmentExpression &&
-                ((AssignmentExpression)this.InitExpression).ResultType == PrimitiveType.Int32 &&
-                ((AssignmentExpression)this.InitExpression).Target is NameExpression)
-            {
-                // for (i = <int>; ?; ?)
-                loopVariableScope = ((NameExpression)((AssignmentExpression)this.InitExpression).Target).Scope;
-                loopVariableName = ((NameExpression)((AssignmentExpression)this.InitExpression).Target).Name;
-                initIsOkay = loopVariableScope is DeclarativeScope && loopVariableScope.HasDeclaredVariable(loopVariableName) == true;
-            }
-
-            // Next, check the condition expression.
-            bool conditionAndInitIsOkay = false;
-            bool lessThan = true;
-            if (initIsOkay == true &&
-                this.ConditionStatement != null &&
-                this.Condition is BinaryExpression &&
-                (((BinaryExpression)this.Condition).OperatorType == OperatorType.LessThan ||
-                ((BinaryExpression)this.Condition).OperatorType == OperatorType.GreaterThan) &&
-                ((BinaryExpression)this.Condition).Left is NameExpression &&
-                ((NameExpression)((BinaryExpression)this.Condition).Left).Name == loopVariableName &&
-                ((BinaryExpression)this.Condition).Right.ResultType == PrimitiveType.Int32)
-            {
-                // for (?; i < <int>; ?)
-                // for (?; i > <int>; ?)
-                lessThan = ((BinaryExpression)this.Condition).OperatorType == OperatorType.LessThan;
-                conditionAndInitIsOkay = true;
-            }
-
-            // Next, check the increment expression.
-            bool everythingIsOkay = false;
-            if (conditionAndInitIsOkay == true)
-            {
-                if (lessThan == true &&
-                    this.IncrementStatement != null &&
-                    this.Increment is AssignmentExpression &&
-                    (((AssignmentExpression)this.Increment).OperatorType == OperatorType.PostIncrement ||
-                    ((AssignmentExpression)this.Increment).OperatorType == OperatorType.PreIncrement) &&
-                    ((NameExpression)((AssignmentExpression)this.Increment).Target).Name == loopVariableName)
-                {
-                    // for (?; i < <int>; i ++)
-                    // for (?; i < <int>; ++ i)
-                    everythingIsOkay = true;
-                }
-                else if (lessThan == false &&
-                    this.IncrementStatement != null &&
-                    this.Increment is AssignmentExpression &&
-                    (((AssignmentExpression)this.Increment).OperatorType == OperatorType.PostDecrement ||
-                    ((AssignmentExpression)this.Increment).OperatorType == OperatorType.PreDecrement) &&
-                    ((NameExpression)((AssignmentExpression)this.Increment).Target).Name == loopVariableName)
-                {
-                    // for (?; i > <int>; i --)
-                    // for (?; i > <int>; -- i)
-                    everythingIsOkay = true;
-                }
-            }
-
-            bool continueEncountered = false;
-            if (everythingIsOkay == true)
-            {
-                // The loop variable can be optimized to an integer.
-                var variable = loopVariableScope.GetDeclaredVariable(loopVariableName);
-                if (variable != null)
-                    result.Add(variable, new InferredTypeInfo() { Type = PrimitiveType.Int32, Conditional = false });
-                FindTypedVariables(this.Body, result, conditional: false, continueEncountered: ref continueEncountered);
-            }
-            else
-            {
-                // Unoptimized.
-                FindTypedVariables(this, result, conditional: false, continueEncountered: ref continueEncountered);
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Finds variables that were assigned to and determines their types.
-        /// </summary>
-        /// <param name="root"> The root of the abstract syntax tree to search. </param>
-        /// <param name="variableTypes"> A dictionary containing the variables that were assigned to. </param>
-        /// <param name="conditional"> <c>true</c> if execution of the AST node <paramref name="root"/>
-        /// is conditional (i.e. the node is inside an if statement or a conditional expression. </param>
-        /// <param name="continueEncountered"> Keeps track of whether a continue statement has been
-        /// encountered. </param>
-        private static void FindTypedVariables(AstNode root, Dictionary<Scope.DeclaredVariable, InferredTypeInfo> variableTypes, bool conditional, ref bool continueEncountered)
-        {
-            if (root is AssignmentExpression)
-            {
-                // Found an assignment.
-                var assignment = (AssignmentExpression)root;
-                if (assignment.Target is NameExpression)
-                {
-                    // Found an assignment to a variable.
-                    var name = (NameExpression)assignment.Target;
-                    if (name.Scope is DeclarativeScope)
-                    {
-                        var variable = name.Scope.GetDeclaredVariable(name.Name);
-                        if (variable != null)
-                        {
-                            // The variable is in the top-most scope.
-                            // Check if the variable has been seen before.
-                            InferredTypeInfo existingTypeInfo;
-                            if (variableTypes.TryGetValue(variable, out existingTypeInfo) == false)
-                            {
-                                // This is the first time the variable has been encountered.
-                                variableTypes.Add(variable, new InferredTypeInfo() { Type = assignment.ResultType, Conditional = conditional });
-                            }
-                            else
-                            {
-                                // The variable has been seen before.
-                                variableTypes[variable] = new InferredTypeInfo()
-                                {
-                                    Type = PrimitiveTypeUtilities.GetCommonType(existingTypeInfo.Type, assignment.ResultType),
-                                    Conditional = existingTypeInfo.Conditional == true && conditional == true
-                                };
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Determine whether the child nodes are conditional.
-            conditional = conditional == true ||
-                continueEncountered == true ||
-                root is IfStatement ||
-                root is TernaryExpression ||
-                root is TryCatchFinallyStatement ||
-                (root is BinaryExpression && ((BinaryExpression)root).OperatorType == OperatorType.LogicalAnd) ||
-                (root is BinaryExpression && ((BinaryExpression)root).OperatorType == OperatorType.LogicalOr);
-
-            // If the AST node is a continue statement, all further assignments are conditional.
-            if (root is ContinueStatement)
-                continueEncountered = true;
-
-            // Search child nodes for assignment statements.
-            foreach (var node in root.ChildNodes)
-                FindTypedVariables(node, variableTypes, conditional: conditional, continueEncountered: ref continueEncountered);
-        }
-
-        /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
-        /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
-        {
-            get
-            {
-                if (this.InitStatement != null)
-                    yield return this.InitStatement;
-                if (this.CheckConditionAtEnd == false && this.ConditionStatement != null)
-                    yield return this.ConditionStatement;
-                yield return this.Body;
-                if (this.IncrementStatement != null)
-                    yield return this.IncrementStatement;
-                if (this.CheckConditionAtEnd == true && this.ConditionStatement != null)
-                    yield return this.ConditionStatement;
-            }
         }
     }
 

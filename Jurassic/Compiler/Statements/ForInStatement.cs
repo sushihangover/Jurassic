@@ -28,27 +28,9 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Gets or sets the portion of source code associated with the variable.
-        /// </summary>
-        public SourceCodeSpan VariableDebugInfo
-        {
-            get;
-            set;
-        }
-
-        /// <summary>
         /// Gets or sets an expression that evaluates to the object to enumerate.
         /// </summary>
         public Expression TargetObject
-        {
-            get;
-            set;
-        }
-
-        /// <summary>
-        /// Gets or sets the portion of source code associated with the target object.
-        /// </summary>
-        public SourceCodeSpan TargetObjectDebugInfo
         {
             get;
             set;
@@ -68,12 +50,8 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals() { NonDefaultBreakStatementBehavior = true, NonDefaultDebugInfoBehavior = true };
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
-
             // Construct a loop expression.
             // var enumerator = TypeUtilities.EnumeratePropertyNames(rhs).GetEnumerator();
             // while (true) {
@@ -86,25 +64,22 @@ namespace Jurassic.Compiler
             // }
             // break-target:
 
-            // Call IEnumerable<string> EnumeratePropertyNames(ScriptEngine engine, object obj)
-            EmitHelpers.LoadScriptEngine(generator);
+            // Emit the right-hand side object and convert to an object.
             this.TargetObject.GenerateCode(generator, optimizationInfo);
             EmitConversion.ToAny(generator, this.TargetObject.ResultType);
+
+            // Call EnumeratePropertyNames()
             generator.Call(ReflectionHelpers.TypeUtilities_EnumeratePropertyNames);
 
-            // Call IEnumerable<string>.GetEnumerator()
+            // Call GetEnumerator()
             generator.Call(ReflectionHelpers.IEnumerable_GetEnumerator);
 
             // Store the enumerator in a temporary variable.
-            var enumerator = generator.CreateTemporaryVariable(typeof(IEnumerator<string>));
+            var enumerator = generator.CreateTemporaryVariable(typeof(object));
             generator.StoreVariable(enumerator);
 
             var breakTarget = generator.CreateLabel();
             var continueTarget = generator.DefineLabelPosition();
-
-            // Emit debugging information.
-            if (optimizationInfo.DebugDocument != null)
-                generator.MarkSequencePoint(optimizationInfo.DebugDocument, this.VariableDebugInfo);
 
             //   if (enumerator.MoveNext() == false)
             //     goto break-target;
@@ -118,35 +93,15 @@ namespace Jurassic.Compiler
             this.Variable.GenerateSet(generator, optimizationInfo, PrimitiveType.String, false);
 
             // Emit the body statement(s).
-            optimizationInfo.PushBreakOrContinueInfo(this.Labels, breakTarget, continueTarget, labelledOnly: false);
+            optimizationInfo.PushBreakOrContinueInfo(this.Labels, breakTarget, continueTarget, false);
             this.Body.GenerateCode(generator, optimizationInfo);
             optimizationInfo.PopBreakOrContinueInfo();
 
             generator.Branch(continueTarget);
             generator.DefineLabelPosition(breakTarget);
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
         }
 
-        /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
-        /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
-        {
-            get
-            {
-                yield return this.TargetObject;
-
-                // Fake a string assignment to the target variable so it gets the correct type.
-                var fakeAssignment = new AssignmentExpression(Operator.Assignment);
-                fakeAssignment.Push((Expression)this.Variable);
-                fakeAssignment.Push(new LiteralExpression(""));
-                yield return fakeAssignment;
-
-                yield return this.Body;
-            }
-        }
+        
 
         /// <summary>
         /// Converts the statement to a string.

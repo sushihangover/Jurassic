@@ -46,7 +46,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // NOTE: this is a get reference because assignment expressions do not call this method.
             GenerateGet(generator, optimizationInfo, false);
@@ -69,7 +69,7 @@ namespace Jurassic.Compiler
             {
                 var rhs = this.GetOperand(1) as NameExpression;
                 if (rhs == null)
-                    throw new JavaScriptException(optimizationInfo.Engine, "SyntaxError", "Invalid member access");
+                    throw new JavaScriptException("SyntaxError", "Invalid member access");
                 propertyName = rhs.Name;
             }
 
@@ -77,7 +77,7 @@ namespace Jurassic.Compiler
             if (this.OperatorType == OperatorType.Index)
             {
                 var rhs = this.GetOperand(1) as LiteralExpression;
-                if (rhs != null && (PrimitiveTypeUtilities.IsNumeric(rhs.ResultType) || rhs.ResultType == PrimitiveType.String))
+                if (rhs != null)
                 {
                     propertyName = TypeConverter.ToString(rhs.Value);
 
@@ -108,68 +108,66 @@ namespace Jurassic.Compiler
             }
             else if (propertyName != null)
             {
-                //// Load the left-hand side and convert to an object instance.
-                //var lhs = this.GetOperand(0);
-                //lhs.GenerateCode(generator, optimizationInfo);
-                //EmitConversion.ToObject(generator, lhs.ResultType);
-
-                //// Call Get(string)
-                //generator.LoadString(propertyName);
-                //generator.Call(ReflectionHelpers.ObjectInstance_GetPropertyValue_String);
-
-
-
-                // Named property access (e.g. x = y.property)
-                // -------------------------------------------
-                // __object_cacheKey = null;
-                // __object_property_cachedIndex = 0;
-                // ...
-                // if (__object_cacheKey != object.InlineCacheKey)
-                //     xxx = object.InlineGetPropertyValue("property", out __object_property_cachedIndex, out __object_cacheKey)
-                // else
-                //     xxx = object.InlinePropertyValues[__object_property_cachedIndex];
-
                 // Load the left-hand side and convert to an object instance.
                 var lhs = this.GetOperand(0);
                 lhs.GenerateCode(generator, optimizationInfo);
                 EmitConversion.ToObject(generator, lhs.ResultType);
 
-                // TODO: share these variables somehow.
-                var cacheKey = generator.DeclareVariable(typeof(object));
-                var cachedIndex = generator.DeclareVariable(typeof(int));
-
-                // Store the object into a temp variable.
-                var objectInstance = generator.DeclareVariable(PrimitiveType.Object);
-                generator.StoreVariable(objectInstance);
-
-                // if (__object_cacheKey != object.InlineCacheKey)
-                generator.LoadVariable(cacheKey);
-                generator.LoadVariable(objectInstance);
-                generator.Call(ReflectionHelpers.ObjectInstance_InlineCacheKey);
-                var elseClause = generator.CreateLabel();
-                generator.BranchIfEqual(elseClause);
-
-                // value = object.InlineGetProperty("property", out __object_property_cachedIndex, out __object_cacheKey)
-                generator.LoadVariable(objectInstance);
+                // Call Get(string)
                 generator.LoadString(propertyName);
-                generator.LoadAddressOfVariable(cachedIndex);
-                generator.LoadAddressOfVariable(cacheKey);
-                generator.Call(ReflectionHelpers.ObjectInstance_InlineGetPropertyValue);
+                generator.Call(ReflectionHelpers.ObjectInstance_GetPropertyValue_String);
 
-                var endOfIf = generator.CreateLabel();
-                generator.Branch(endOfIf);
-
+                // Named property access
+                // ---------------------
+                // __object_cacheKey = null;
+                // __object_property_cachedIndex = 0;
+                // ...
+                // if (__object_cacheKey != object.CacheKey)
+                //     xxx = object.InlineGetProperty("property", out __object_property_cachedIndex, out __object_cacheKey)
                 // else
-                generator.DefineLabelPosition(elseClause);
+                //     xxx = object.PropertyValues[__object_property_cachedIndex];
 
-                // value = object.InlinePropertyValues[__object_property_cachedIndex];
-                generator.LoadVariable(objectInstance);
-                generator.Call(ReflectionHelpers.ObjectInstance_InlinePropertyValues);
-                generator.LoadVariable(cachedIndex);
-                generator.LoadArrayElement(typeof(object));
+                // Load the left-hand side and convert to an object instance.
+                //var lhs = this.GetOperand(0);
+                //lhs.GenerateCode(generator, optimizationInfo);
+                //EmitConversion.ToObject(generator, lhs.ResultType);
 
-                // End of the if statement
-                generator.DefineLabelPosition(endOfIf);
+                //// TODO: share these variables somehow.
+                //var cacheKey = generator.DeclareVariable(typeof(object));
+                //var cachedIndex = generator.DeclareVariable(typeof(int));
+
+                //// Store the object into a temp variable.
+                //var objectInstance = generator.DeclareVariable(PrimitiveType.Object);
+                //generator.StoreVariable(objectInstance);
+
+                //// if (__object_cacheKey != object.CacheKey)
+                //generator.LoadVariable(cacheKey);
+                //generator.LoadVariable(objectInstance);
+                //generator.Call(ReflectionHelpers.ObjectInstance_CacheKey);
+                //var elseClause = generator.CreateLabel();
+                //generator.BranchIfEqual(elseClause);
+
+                //// xxx = object.InlineGetProperty("property", out __object_property_cachedIndex, out __object_cacheKey)
+                //generator.LoadVariable(objectInstance);
+                //generator.LoadString(propertyName);
+                //generator.LoadAddressOfVariable(cachedIndex);
+                //generator.LoadAddressOfVariable(cacheKey);
+                //generator.Call(ReflectionHelpers.ObjectInstance_InlineGetPropertyValue);
+
+                //var endOfIf = generator.CreateLabel();
+                //generator.Branch(endOfIf);
+
+                //// else
+                //generator.DefineLabelPosition(elseClause);
+
+                //// xxx = object.PropertyValues[__object_property_cachedIndex];
+                //generator.LoadVariable(objectInstance);
+                //generator.Call(ReflectionHelpers.ObjectInstance_PropertyValues);
+                //generator.LoadVariable(cachedIndex);
+                //generator.LoadArrayElement(typeof(object));
+
+                //// End of the if statement
+                //generator.DefineLabelPosition(endOfIf);
 
             }
             else
@@ -212,7 +210,7 @@ namespace Jurassic.Compiler
             {
                 var rhs = this.GetOperand(1) as NameExpression;
                 if (rhs == null)
-                    throw new JavaScriptException(optimizationInfo.Engine, "SyntaxError", "Invalid member access");
+                    throw new JavaScriptException("SyntaxError", "Invalid member access");
                 propertyName = rhs.Name;
             }
 
@@ -258,73 +256,25 @@ namespace Jurassic.Compiler
             }
             else if (propertyName != null)
             {
-                //// Load the left-hand side and convert to an object instance.
-                //var lhs = this.GetOperand(0);
-                //lhs.GenerateCode(generator, optimizationInfo);
-                //EmitConversion.ToObject(generator, lhs.ResultType);
-
-                //// Call the indexer.
-                //generator.LoadString(propertyName);
-                //generator.LoadVariable(value);
-                //generator.LoadBoolean(optimizationInfo.StrictMode);
-                //generator.Call(ReflectionHelpers.ObjectInstance_SetPropertyValue_String);
-
-
-
-                // Named property modification (e.g. x.property = y)
-                // -------------------------------------------------
-                // __object_cacheKey = null;
-                // __object_property_cachedIndex = 0;
-                // ...
-                // if (__object_cacheKey != object.InlineCacheKey)
-                //     object.InlineSetPropertyValue("property", value, strictMode, out __object_property_cachedIndex, out __object_cacheKey)
-                // else
-                //     object.InlinePropertyValues[__object_property_cachedIndex] = value;
-
                 // Load the left-hand side and convert to an object instance.
                 var lhs = this.GetOperand(0);
                 lhs.GenerateCode(generator, optimizationInfo);
                 EmitConversion.ToObject(generator, lhs.ResultType);
 
-                // TODO: share these variables somehow.
-                var cacheKey = generator.DeclareVariable(typeof(object));
-                var cachedIndex = generator.DeclareVariable(typeof(int));
-
-                // Store the object into a temp variable.
-                var objectInstance = generator.DeclareVariable(PrimitiveType.Object);
-                generator.StoreVariable(objectInstance);
-
-                // if (__object_cacheKey != object.InlineCacheKey)
-                generator.LoadVariable(cacheKey);
-                generator.LoadVariable(objectInstance);
-                generator.Call(ReflectionHelpers.ObjectInstance_InlineCacheKey);
-                var elseClause = generator.CreateLabel();
-                generator.BranchIfEqual(elseClause);
-
-                // xxx = object.InlineSetPropertyValue("property", value, strictMode, out __object_property_cachedIndex, out __object_cacheKey)
-                generator.LoadVariable(objectInstance);
+                // Call the indexer.
                 generator.LoadString(propertyName);
                 generator.LoadVariable(value);
                 generator.LoadBoolean(optimizationInfo.StrictMode);
-                generator.LoadAddressOfVariable(cachedIndex);
-                generator.LoadAddressOfVariable(cacheKey);
-                generator.Call(ReflectionHelpers.ObjectInstance_InlineSetPropertyValue);
+                generator.Call(ReflectionHelpers.ObjectInstance_SetPropertyValue_String);
 
-                var endOfIf = generator.CreateLabel();
-                generator.Branch(endOfIf);
-
+                // Example for setting "object.property"
+                // __object_cachedVersion = 0;
+                // __object_property_cachedIndex = 0;
+                // ...
+                // if (__object_cachedVersion < object.Version)
+                //     object.InlineSetProperty("property", value, out __object_property_cachedIndex, out __object_cachedVersion)
                 // else
-                generator.DefineLabelPosition(elseClause);
-
-                // object.InlinePropertyValues[__object_property_cachedIndex] = value;
-                generator.LoadVariable(objectInstance);
-                generator.Call(ReflectionHelpers.ObjectInstance_InlinePropertyValues);
-                generator.LoadVariable(cachedIndex);
-                generator.LoadVariable(value);
-                generator.StoreArrayElement(typeof(object));
-
-                // End of the if statement
-                generator.DefineLabelPosition(endOfIf);
+                //     object.PropertyValues[__object_property_cachedIndex] = value;
 
             }
             else
@@ -368,7 +318,7 @@ namespace Jurassic.Compiler
 
             // Load the property name and convert to a string.
             var rhs = this.GetOperand(1);
-            if (this.OperatorType == OperatorType.MemberAccess && rhs is NameExpression)
+            if (rhs is NameExpression)
                 generator.LoadString((rhs as NameExpression).Name);
             else
             {

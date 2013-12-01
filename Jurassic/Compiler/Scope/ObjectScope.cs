@@ -6,25 +6,15 @@ namespace Jurassic.Compiler
     /// <summary>
     /// Represents a scope which is backed by the properties of an object.
     /// </summary>
-    [Serializable]
     public class ObjectScope : Scope
     {
-        private Library.ObjectInstance scopeObject;
-
-        [NonSerialized]
-        private Expression scopeObjectExpression;
-
-        private bool providesImplicitThisValue;
-
         /// <summary>
         /// Creates a new global object scope.
         /// </summary>
         /// <returns> A new ObjectScope instance. </returns>
-        internal static ObjectScope CreateGlobalScope(Library.GlobalObject globalObject)
+        public static ObjectScope CreateGlobalScope()
         {
-            if (globalObject == null)
-                throw new ArgumentNullException("globalObject");
-            return new ObjectScope(null) { ScopeObject = globalObject };
+            return new ObjectScope(null) { ScopeObject = Library.GlobalObject.Instance };
         }
 
         /// <summary>
@@ -37,35 +27,31 @@ namespace Jurassic.Compiler
         {
             if (parentScope == null)
                 throw new ArgumentException("With scopes must have a parent scope.");
-            return new ObjectScope(parentScope) { ScopeObjectExpression = scopeObject, ProvidesImplicitThisValue = true, CanDeclareVariables = false };
+            return new ObjectScope(parentScope) { ScopeObjectExpression = scopeObject, ProvidesImplicitThisValue = true };
         }
 
-        ///// <summary>
-        ///// Creates a new object scope for use inside a with statement.
-        ///// </summary>
-        ///// <param name="parentScope"> A reference to the parent scope.  Can not be <c>null</c>. </param>
-        ///// <param name="scopeObject"> An expression that evaluates to the object to use. </param>
-        ///// <returns> A new ObjectScope instance. </returns>
-        //public static ObjectScope CreateWithScope(Scope parentScope, Library.ObjectInstance scopeObject)
-        //{
-        //    if (parentScope == null)
-        //        throw new ArgumentException("With scopes must have a parent scope.");
-        //    return new ObjectScope(parentScope) { ScopeObject = scopeObject, ProvidesImplicitThisValue = true };
-        //}
+        /// <summary>
+        /// Creates a new object scope for use inside a with statement.
+        /// </summary>
+        /// <param name="parentScope"> A reference to the parent scope.  Can not be <c>null</c>. </param>
+        /// <param name="scopeObject"> An expression that evaluates to the object to use. </param>
+        /// <returns> A new ObjectScope instance. </returns>
+        public static ObjectScope CreateWithScope(Scope parentScope, Library.ObjectInstance scopeObject)
+        {
+            if (parentScope == null)
+                throw new ArgumentException("With scopes must have a parent scope.");
+            return new ObjectScope(parentScope) { ScopeObject = scopeObject, ProvidesImplicitThisValue = true };
+        }
 
         /// <summary>
         /// Creates a new object scope for use at runtime.
         /// </summary>
         /// <param name="parentScope"> A reference to the parent scope.  Can not be <c>null</c>. </param>
         /// <param name="scopeObject"> An expression that evaluates to the object to use. </param>
-        /// <param name="providesImplicitThisValue"> Indicates whether an implicit "this" value is
-        /// supplied to function calls in this scope. </param>
-        /// <param name="canDeclareVariables"> Indicates whether variables can be declared within
-        /// the scope. </param>
         /// <returns> A new ObjectScope instance. </returns>
-        public static ObjectScope CreateRuntimeScope(Scope parentScope, Library.ObjectInstance scopeObject, bool providesImplicitThisValue, bool canDeclareVariables)
+        public static ObjectScope CreateRuntimeScope(Scope parentScope, Library.ObjectInstance scopeObject)
         {
-            return new ObjectScope(parentScope) { ScopeObject = scopeObject, ProvidesImplicitThisValue = providesImplicitThisValue, CanDeclareVariables = canDeclareVariables };
+            return new ObjectScope(parentScope) { ScopeObject = scopeObject };
         }
 
         /// <summary>
@@ -83,8 +69,8 @@ namespace Jurassic.Compiler
         /// </summary>
         public Library.ObjectInstance ScopeObject
         {
-            get { return this.scopeObject; }
-            private set { this.scopeObject = value; }
+            get;
+            private set;
         }
 
         /// <summary>
@@ -93,8 +79,8 @@ namespace Jurassic.Compiler
         /// </summary>
         internal Expression ScopeObjectExpression
         {
-            get { return this.scopeObjectExpression; }
-            private set { this.scopeObjectExpression = value; }
+            get;
+            private set;
         }
 
         /// <summary>
@@ -103,8 +89,8 @@ namespace Jurassic.Compiler
         /// </summary>
         public bool ProvidesImplicitThisValue
         {
-            get { return this.providesImplicitThisValue; }
-            private set { this.providesImplicitThisValue = value; }
+            get;
+            private set;
         }
 
         /// <summary>
@@ -146,17 +132,6 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Deletes the variable from the scope.
-        /// </summary>
-        /// <param name="variableName"> The name of the variable. </param>
-        public override bool Delete(string variableName)
-        {
-            if (this.ScopeObject == null)
-                throw new InvalidOperationException("The scope object is not yet available.");
-            return this.ScopeObject.Delete(variableName, false);
-        }
-
-        /// <summary>
         /// Generates code that creates a new scope.
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
@@ -164,23 +139,20 @@ namespace Jurassic.Compiler
         internal override void GenerateScopeCreation(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // Create a new runtime object scope.
-            EmitHelpers.LoadScope(generator);  // parent scope
+            generator.LoadArgument(0);  // parent scope
             if (this.ScopeObjectExpression == null)
             {
-                EmitHelpers.LoadScriptEngine(generator);
-                generator.Call(ReflectionHelpers.ScriptEngine_Global);
+                generator.Call(ReflectionHelpers.Global_Instance);
             }
             else
             {
                 this.ScopeObjectExpression.GenerateCode(generator, optimizationInfo);
                 EmitConversion.ToObject(generator, this.ScopeObjectExpression.ResultType);
             }
-            generator.LoadBoolean(this.ProvidesImplicitThisValue);
-            generator.LoadBoolean(this.CanDeclareVariables);
             generator.Call(ReflectionHelpers.ObjectScope_CreateRuntimeScope);
 
-            // Save the new scope.
-            EmitHelpers.StoreScope(generator);
+            // Store the scope in the first method parameter.
+            generator.StoreArgument(0);
         }
 
         /// <summary>
@@ -223,7 +195,7 @@ namespace Jurassic.Compiler
             //// Store the scope object into a temp variable.
             //var scopeObject = generator.DeclareVariable(typeof(Library.ObjectInstance));
             //if (scope == null)
-            //    EmitHelpers.LoadScope(generator);
+            //    generator.LoadArgument(0);
             //else
             //    generator.LoadVariable(scope);
             //generator.Call(ReflectionHelpers.Scope_ScopeObject);
@@ -274,7 +246,7 @@ namespace Jurassic.Compiler
             //{
             //    // scope = scope.ParentScope
             //    if (scope == null)
-            //        EmitHelpers.LoadScope(generator);
+            //        generator.LoadArgument(0);
             //    else
             //        generator.LoadVariable(scope);
             //    generator.Duplicate();
@@ -355,7 +327,7 @@ namespace Jurassic.Compiler
             //// Store the scope object into a temp variable.
             //var scopeObject = generator.DeclareVariable(typeof(Library.ObjectInstance));
             //if (scope == null)
-            //    EmitHelpers.LoadScope(generator);
+            //    generator.LoadArgument(0);
             //else
             //    generator.LoadVariable(scope);
             //generator.Call(ReflectionHelpers.Scope_ScopeObject);
@@ -416,7 +388,7 @@ namespace Jurassic.Compiler
             //{
             //    // scope = scope.ParentScope
             //    if (scope == null)
-            //        EmitHelpers.LoadScope(generator);
+            //        generator.LoadArgument(0);
             //    else
             //        generator.LoadVariable(scope);
             //    generator.Duplicate();

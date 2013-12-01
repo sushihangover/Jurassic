@@ -9,7 +9,6 @@ namespace Jurassic.Library
     /// </summary>
     internal sealed class JSONParser
     {
-        private ScriptEngine engine;
         private JSONLexer lexer;
         private Token nextToken;
 
@@ -20,15 +19,11 @@ namespace Jurassic.Library
         /// <summary>
         /// Creates a JSONParser instance with the given lexer supplying the tokens.
         /// </summary>
-        /// <param name="engine"> The associated script engine. </param>
         /// <param name="lexer"> The lexical analyser that provides the tokens. </param>
-        public JSONParser(ScriptEngine engine, JSONLexer lexer)
+        public JSONParser(JSONLexer lexer)
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
             if (lexer == null)
                 throw new ArgumentNullException("lexer");
-            this.engine = engine;
             this.lexer = lexer;
             this.Consume();
         }
@@ -73,7 +68,7 @@ namespace Jurassic.Library
             if (this.nextToken == token)
                 Consume();
             else
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected '{0}'", token.Text));
+                throw new JavaScriptException("SyntaxError", string.Format("Expected '{0}'", token.Text));
         }
 
         /// <summary>
@@ -91,7 +86,7 @@ namespace Jurassic.Library
             }
             else
             {
-                throw new JavaScriptException(this.engine, "SyntaxError", "Expected identifier");
+                throw new JavaScriptException("SyntaxError", "Expected identifier");
             }
         }
 
@@ -110,14 +105,10 @@ namespace Jurassic.Library
             // Parse the JSON text.
             object root = ParseValue();
 
-            // We should now be at the end of the input.
-            if (this.nextToken != null)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Expected end of input");
-
             // Apply the reviver function, if there is one.
             if (this.ReviverFunction != null)
             {
-                var tempObject = this.engine.Object.Construct();
+                var tempObject = GlobalObject.Object.Construct();
                 tempObject[string.Empty] = root;
                 return this.ReviverFunction.CallLateBound(tempObject, string.Empty, root);
             }
@@ -146,9 +137,9 @@ namespace Jurassic.Library
                 result = ParseArrayLiteral();
             }
             else if (this.nextToken == null)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected end of input");
+                throw new JavaScriptException("SyntaxError", "Unexpected end of input");
             else
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Unexpected token {0}", this.nextToken));
+                throw new JavaScriptException("SyntaxError", string.Format("Unexpected token {0}", this.nextToken));
             return result;
         }
 
@@ -162,7 +153,7 @@ namespace Jurassic.Library
             this.Expect(PunctuatorToken.LeftBracket);
 
             // Loop until the next token is ']'.
-            var result = this.engine.Array.New();
+            var result = GlobalObject.Array.New();
             uint arrayIndex = 0;
             while (this.nextToken != PunctuatorToken.RightBracket)
             {
@@ -212,7 +203,7 @@ namespace Jurassic.Library
             this.Expect(PunctuatorToken.LeftBrace);
 
             // If the next token is '}', then the object literal is complete.
-            var result = this.engine.Object.Construct();
+            var result = GlobalObject.Object.Construct();
             bool expectComma = false;
             while (this.nextToken != PunctuatorToken.RightBrace)
             {
@@ -228,11 +219,11 @@ namespace Jurassic.Library
                     // The property name must be a string.
                     object literalValue = ((LiteralToken)this.nextToken).Value;
                     if ((literalValue is string) == false)
-                        throw new JavaScriptException(this.engine, "SyntaxError", "Expected property name");
+                        throw new JavaScriptException("SyntaxError", "Expected property name");
                     propertyName = (string)literalValue;
                 }
                 else
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Expected property name");
+                    throw new JavaScriptException("SyntaxError", "Expected property name");
                 this.Consume();
 
                 // Read the colon.

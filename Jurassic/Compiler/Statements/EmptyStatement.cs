@@ -19,18 +19,21 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
+        /// Visits every node in the statement.
+        /// </summary>
+        /// <param name="visitor"> The visitor callback. </param>
+        public override void Visit(Action<Statement> visitor)
+        {
+            visitor(this);
+        }
+
+        /// <summary>
         /// Generates CIL for the statement.
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals();
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
         }
 
         /// <summary>

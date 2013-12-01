@@ -28,48 +28,10 @@ namespace UnitTests
             Assert.AreEqual(double.NaN, TestUtils.Evaluate("NaN"));
             Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("undefined"));
 
-            // In ECMAScript 5 these properties are not enumerable, not configurable and not writable.
+            // These properties are not enumerable, not configurable and not writable (they were writable in ECMAScript 3 however).
             Assert.AreEqual(PropertyAttributes.Sealed, TestUtils.EvaluateAccessibility("this", "Infinity"));
             Assert.AreEqual(PropertyAttributes.Sealed, TestUtils.EvaluateAccessibility("this", "NaN"));
             Assert.AreEqual(PropertyAttributes.Sealed, TestUtils.EvaluateAccessibility("this", "undefined"));
-
-            // In ECMAScript 5 these properties are not enumerable, not configurable and writable.
-            TestUtils.CompatibilityMode = CompatibilityMode.ECMAScript3;
-            try
-            {
-                Assert.AreEqual(PropertyAttributes.Writable, TestUtils.EvaluateAccessibility("this", "Infinity"));
-                Assert.AreEqual(PropertyAttributes.Writable, TestUtils.EvaluateAccessibility("this", "NaN"));
-                Assert.AreEqual(PropertyAttributes.Writable, TestUtils.EvaluateAccessibility("this", "undefined"));
-            }
-            finally
-            {
-                TestUtils.CompatibilityMode = CompatibilityMode.Latest;
-            }
-
-            // Built-in objects should be writable and configurable but not enumerable.
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Array"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Boolean"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Date"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Error"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "EvalError"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Function"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "JSON"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Math"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Number"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "Object"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "RangeError"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "ReferenceError"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "RegExp"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "String"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "SyntaxError"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "TypeError"));
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "URIError"));
-
-            // Functions are writable and configurable.
-            Assert.AreEqual(PropertyAttributes.NonEnumerable, TestUtils.EvaluateAccessibility("this", "decodeURI"));
-
-            // length is sealed.
-            Assert.AreEqual(PropertyAttributes.Sealed, TestUtils.EvaluateAccessibility("this.decodeURI", "length"));
         }
 
         [TestMethod]
@@ -177,36 +139,13 @@ namespace UnitTests
         public void eval()
         {
             Assert.AreEqual(Undefined.Value, TestUtils.Evaluate("eval()"));
-            Assert.AreEqual(5, TestUtils.Evaluate("eval(5)"));
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {}; eval(x) === x;"));
-            Assert.AreEqual(true, TestUtils.Evaluate("var x = {}; e = eval; e(x) === x;"));
             Assert.AreEqual(1, TestUtils.Evaluate("eval('Math.abs(-1)')"));
 
             // The lexical environment does not change inside an eval if it is a direct call.
-            Assert.AreEqual(5, TestUtils.Evaluate("(function() { var a = 5; return eval('a'); })()"));
             Assert.AreEqual(6, TestUtils.Evaluate("(function() { var a = 5; eval('a = 6'); return a; })()"));
-
-            // Variables should not be reinitialized.
-            Assert.AreEqual(0, TestUtils.Evaluate("var x = 0; eval('var x'); x"));
-
-            // Eval() can introduce new variables into a function scope.
-            Assert.AreEqual(5, TestUtils.Evaluate("b = 1; (function() { var a = 5; eval('var b = a'); return b; })()"));
-            Assert.AreEqual(1, TestUtils.Evaluate("b = 1; (function() { var a = 5; eval('var b = a'); b = 4; })(); b;"));
-            Assert.AreEqual(8, TestUtils.Evaluate("(function() { eval('var b = 8'); return eval('b'); })();"));
 
             // The global lexical environment is used for a non-direct call.
             Assert.AreEqual(5, TestUtils.Evaluate("e = eval; (function() { var a = 5; e('a = 6'); return a; })()"));
-            Assert.AreEqual(1, TestUtils.Evaluate("e = eval; a = 1; (function() { var a = 5; return e('a'); })()"));
-            Assert.AreEqual(3, TestUtils.Evaluate("e = eval; a = 3; b = 2; (function() { var a = 5; e('var b = a'); return b; })()"));
-            Assert.AreEqual(3, TestUtils.Evaluate("e = eval; a = 3; b = 2; (function() { var a = 5; e('var b = a'); })(); b"));
-
-            // Strict mode: eval has it's own scope.
-            TestUtils.Evaluate("delete a");
-            Assert.AreEqual("undefined", TestUtils.Evaluate("'use strict'; eval('var a = false'); typeof a"));
-            Assert.AreEqual("undefined", TestUtils.Evaluate(@"eval(""'use strict'; var a = false""); typeof a"));
-
-            // Return is not allowed.
-            Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("e = eval; (function() { var a = 5; e('return a'); })()"));
         }
 
         [TestMethod]
@@ -225,6 +164,7 @@ namespace UnitTests
             Assert.AreEqual(true, TestUtils.Evaluate("isFinite('')"));
             Assert.AreEqual(true, TestUtils.Evaluate(@"isFinite('  \n \t ')"));
             Assert.AreEqual(true, TestUtils.Evaluate(@"isFinite(null)"));
+            
         }
 
         [TestMethod]
@@ -258,9 +198,6 @@ namespace UnitTests
             Assert.AreEqual(11, TestUtils.Evaluate("parseFloat('011')"));
             Assert.AreEqual(11, TestUtils.Evaluate("parseFloat(' 11')"));
             Assert.AreEqual(0.5, TestUtils.Evaluate("parseFloat('.5')"));
-            Assert.AreEqual(0.1, TestUtils.Evaluate("parseFloat('.1')"));
-            Assert.AreEqual(0.01, TestUtils.Evaluate("parseFloat('.01')"));
-            Assert.AreEqual(0.07, TestUtils.Evaluate("parseFloat('.7e-1')"));
             Assert.AreEqual(-0.5, TestUtils.Evaluate("parseFloat('-.5')"));
             Assert.AreEqual(5, TestUtils.Evaluate("parseFloat('5e')"));
             Assert.AreEqual(5, TestUtils.Evaluate("parseFloat('5.e')"));
@@ -270,18 +207,9 @@ namespace UnitTests
             Assert.AreEqual(double.PositiveInfinity, TestUtils.Evaluate("parseFloat('Infinity')"));
             Assert.AreEqual(double.NegativeInfinity, TestUtils.Evaluate("parseFloat('-Infinity')"));
             Assert.AreEqual(double.PositiveInfinity, TestUtils.Evaluate("parseFloat(' Infinity')"));
-            Assert.AreEqual(double.PositiveInfinity, TestUtils.Evaluate("parseFloat('InfinityZ')"));
             Assert.AreEqual(0, TestUtils.Evaluate("parseFloat('0xff')"));
-            Assert.AreEqual(0, TestUtils.Evaluate("parseFloat('0x')"));
             Assert.AreEqual(0, TestUtils.Evaluate("parseFloat('0zff')"));
             Assert.AreEqual(double.NaN, TestUtils.Evaluate("parseFloat('infinity')"));
-            Assert.AreEqual(-1.1, TestUtils.Evaluate("parseFloat('\u205F -1.1')"));
-
-            // Very large numbers.
-            Assert.AreEqual(18446744073709551616d, TestUtils.Evaluate("parseFloat('18446744073709551616')"));
-            Assert.AreEqual(295147905179352825856d, TestUtils.Evaluate("parseFloat('295147905179352825856')"));
-            Assert.AreEqual(4722366482869645213696d, TestUtils.Evaluate("parseFloat('4722366482869645213696')"));
-            Assert.AreEqual(75557863725914323419136d, TestUtils.Evaluate("parseFloat('75557863725914323419136')"));
         }
 
         [TestMethod]
@@ -290,23 +218,6 @@ namespace UnitTests
             Assert.AreEqual(1, TestUtils.Evaluate("parseInt('1')"));
             Assert.AreEqual(123, TestUtils.Evaluate("parseInt('123')"));
             Assert.AreEqual(65, TestUtils.Evaluate("parseInt('65')"));
-            Assert.AreEqual(987654, TestUtils.Evaluate("parseInt('987654')"));
-            Assert.AreEqual(10000000, TestUtils.Evaluate("parseInt('10000000')"));
-            Assert.AreEqual(10000001, TestUtils.Evaluate("parseInt('10000001')"));
-            Assert.AreEqual(987654321, TestUtils.Evaluate("parseInt('987654321')"));
-            Assert.AreEqual(9876543212d, TestUtils.Evaluate("parseInt('9876543212')"));
-            Assert.AreEqual(987654321234d, TestUtils.Evaluate("parseInt('987654321234')"));
-            Assert.AreEqual(-987654321234d, TestUtils.Evaluate("parseInt('-987654321234')"));
-            Assert.AreEqual(9876543212345d, TestUtils.Evaluate("parseInt('9876543212345')"));
-            Assert.AreEqual(98765432123456d, TestUtils.Evaluate("parseInt('98765432123456')"));
-            Assert.AreEqual(987654321234567d, TestUtils.Evaluate("parseInt('987654321234567')"));
-            Assert.AreEqual(9876543212345678d, TestUtils.Evaluate("parseInt('9876543212345678')"));
-            Assert.AreEqual(98765432123456789d, TestUtils.Evaluate("parseInt('98765432123456789')"));
-            Assert.AreEqual(-98765432123456789d, TestUtils.Evaluate("parseInt('-98765432123456789')"));
-            Assert.AreEqual(18446744073709551616d, TestUtils.Evaluate("parseInt('18446744073709551616')"));
-            Assert.AreEqual(295147905179352825856d, TestUtils.Evaluate("parseInt('295147905179352825856')"));
-            Assert.AreEqual(4722366482869645213696d, TestUtils.Evaluate("parseInt('4722366482869645213696')"));
-            Assert.AreEqual(75557863725914323419136d, TestUtils.Evaluate("parseInt('75557863725914323419136')"));
 
             // Sign.
             Assert.AreEqual(-123, TestUtils.Evaluate("parseInt('-123')"));
@@ -322,7 +233,6 @@ namespace UnitTests
 
             // Hex prefix should be respected.
             Assert.AreEqual(17, TestUtils.Evaluate("parseInt('0x11')"));
-            Assert.AreEqual(1.512366075204171e+36, TestUtils.Evaluate("parseInt('0x123456789abcdef0123456789abcdef')"));
             
             // Bases.
             Assert.AreEqual(17, TestUtils.Evaluate("parseInt('0x11', 16)"));
@@ -330,17 +240,6 @@ namespace UnitTests
             Assert.AreEqual(17, TestUtils.Evaluate("parseInt('11', 16)"));
             Assert.AreEqual(2748, TestUtils.Evaluate("parseInt('abc', 16)"));
             Assert.AreEqual(3, TestUtils.Evaluate("parseInt('11', 2)"));
-            Assert.AreEqual(16, TestUtils.Evaluate("parseInt('0x10')"));
-            Assert.AreEqual(4096, TestUtils.Evaluate("parseInt('0x1000')"));
-            Assert.AreEqual(1048576, TestUtils.Evaluate("parseInt('0x100000')"));
-            Assert.AreEqual(268435456, TestUtils.Evaluate("parseInt('0x10000000')"));
-            Assert.AreEqual(68719476736d, TestUtils.Evaluate("parseInt('0x1000000000')"));
-            Assert.AreEqual(17592186044416d, TestUtils.Evaluate("parseInt('0x100000000000')"));
-            Assert.AreEqual(4503599627370496d, TestUtils.Evaluate("parseInt('0x10000000000000')"));
-            Assert.AreEqual(1152921504606847000d, TestUtils.Evaluate("parseInt('0x1000000000000000')"));
-            Assert.AreEqual(295147905179352830000d, TestUtils.Evaluate("parseInt('0x100000000000000000')"));
-            Assert.AreEqual(7.555786372591432e+22, TestUtils.Evaluate("parseInt('0x10000000000000000000')"));
-            Assert.AreEqual(1.9342813113834067e+25, TestUtils.Evaluate("parseInt('0x1000000000000000000000')"));
 
             // Base out of range.
             Assert.AreEqual(double.NaN, TestUtils.Evaluate("parseInt('11', 1)"));
@@ -360,35 +259,12 @@ namespace UnitTests
             Assert.AreEqual(0, TestUtils.Evaluate("parseInt('0z11', 10)"));
             Assert.AreEqual(0, TestUtils.Evaluate("parseInt('0z11')"));
 
+            // Octal parsing was removed from ES5.
+            Assert.AreEqual(TestUtils.Engine == JSEngine.JScript ? 9 : 11, TestUtils.Evaluate("parseInt('011')"));
+            Assert.AreEqual(11, TestUtils.Evaluate("parseInt('011', 10)"));
+
             // Radix uses ToInt32() so has weird wrapping issues.
             Assert.AreEqual(19, TestUtils.Evaluate("parseInt('23', 4294967304)"));
-
-            // Octal parsing (only works in compatibility mode).
-            TestUtils.CompatibilityMode = CompatibilityMode.ECMAScript3;
-            try
-            {
-                Assert.AreEqual(9, TestUtils.Evaluate("parseInt('011')"));
-                Assert.AreEqual(0, TestUtils.Evaluate("parseInt('08')"));
-                Assert.AreEqual(1, TestUtils.Evaluate("parseInt('018')"));
-                Assert.AreEqual(11, TestUtils.Evaluate("parseInt('011', 10)"));
-            }
-            finally
-            {
-                TestUtils.CompatibilityMode = CompatibilityMode.Latest;
-            }
-
-            // Octal parsing was removed from ES5.
-            if (TestUtils.Engine != JSEngine.JScript)
-            {
-                Assert.AreEqual(11, TestUtils.Evaluate("parseInt('011')"));
-                Assert.AreEqual(8, TestUtils.Evaluate("parseInt('08')"));
-                Assert.AreEqual(18, TestUtils.Evaluate("parseInt('018')"));
-                Assert.AreEqual(11, TestUtils.Evaluate("parseInt('011', 10)"));
-            }
-
-            // Large numbers.
-            Assert.AreEqual(9214843084008499.0, TestUtils.Evaluate("parseInt('9214843084008499')"));
-            Assert.AreEqual(18014398509481993.0, TestUtils.Evaluate("parseInt('18014398509481993')"));
         }
 
         [TestMethod]

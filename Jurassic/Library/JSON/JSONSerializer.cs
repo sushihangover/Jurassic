@@ -7,9 +7,8 @@ namespace Jurassic.Library
     /// <summary>
     /// Converts a value into JSON text.
     /// </summary>
-    internal sealed class JSONSerializer
+    internal class JSONSerializer
     {
-        private ScriptEngine engine;
         private Stack<ObjectInstance> objectStack;
         private Stack<ArrayInstance> arrayStack;
         private string separator;
@@ -17,12 +16,8 @@ namespace Jurassic.Library
         /// <summary>
         /// Creates a new JSONSerializer instance with the default options.
         /// </summary>
-        /// <param name="engine"> The associated script engine. </param>
-        public JSONSerializer(ScriptEngine engine)
+        public JSONSerializer()
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
-            this.engine = engine;
         }
 
         /// <summary>
@@ -66,7 +61,7 @@ namespace Jurassic.Library
             this.separator = string.IsNullOrEmpty(this.Indentation) ? string.Empty : "\n";
 
             // Create a temp object to hold the value.
-            var tempObject = this.engine.Object.Construct();
+            var tempObject = GlobalObject.Object.Construct();
             tempObject[string.Empty] = value;
 
             // Transform the value.
@@ -171,9 +166,9 @@ namespace Jurassic.Library
             }
 
             // Serialize a string value.
-            if (value is string || value is ConcatenatedString)
+            if (value is string)
             {
-                QuoteString(value.ToString(), result);
+                QuoteString((string)value, result);
                 return;
             }
 
@@ -295,7 +290,7 @@ namespace Jurassic.Library
 
             // Check for cyclical references.
             if (this.objectStack.Contains(value) == true)
-                throw new JavaScriptException(this.engine, "TypeError", "The given object must not contain cyclical references");
+                throw new JavaScriptException("TypeError", "The given object must not contain cyclical references");
             this.objectStack.Push(value);
 
             // Create a list of property names to serialize.
@@ -359,7 +354,7 @@ namespace Jurassic.Library
 
             // Check for cyclical references.
             if (this.arrayStack.Contains(value) == true)
-                throw new JavaScriptException(this.engine, "TypeError", "The given object must not contain cyclical references");
+                throw new JavaScriptException("TypeError", "The given object must not contain cyclical references");
             this.arrayStack.Push(value);
 
             result.Append('[');

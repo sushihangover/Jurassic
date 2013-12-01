@@ -7,7 +7,7 @@ namespace Jurassic.Compiler
     /// <summary>
     /// Represents a javascript statement.
     /// </summary>
-    internal abstract class Statement : AstNode
+    internal abstract class Statement
     {
         private List<string> labels;
 
@@ -39,9 +39,7 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Gets or sets the portion of source code associated with this statement.  For
-        /// single-line statements this encompasses the whole statement but for multi-line (block)
-        /// statements it only encompasses part of the statement.
+        /// Gets or sets the portion of source code associated with this statement.
         /// </summary>
         public SourceCodeSpan DebugInfo
         {
@@ -50,84 +48,72 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Locals needed by GenerateStartOfStatement() and GenerateEndOfStatement().
+        /// Visits every node in the statement.
         /// </summary>
-        public class StatementLocals
+        /// <param name="visitor"> The visitor callback. </param>
+        public virtual void Visit(Action<Statement> visitor)
         {
-            /// <summary>
-            /// Gets or sets a value that indicates whether the break statement will be handled
-            /// specially by the calling code - this means that GenerateStartOfStatement() and
-            /// GenerateEndOfStatement() do not have to generate code to handle the break
-            /// statement.
-            /// </summary>
-            public bool NonDefaultBreakStatementBehavior;
-
-            /// <summary>
-            /// Gets or sets a value that indicates whether the debugging information will be
-            /// handled specially by the calling code - this means that GenerateStartOfStatement()
-            /// and GenerateEndOfStatement() do not have to set this information.
-            /// </summary>
-            public bool NonDefaultDebugInfoBehavior;
-
-            /// <summary>
-            /// Gets or sets a label marking the end of the statement.
-            /// </summary>
-            public ILLabel EndOfStatement;
-
-#if DEBUG && !SILVERLIGHT
-            /// <summary>
-            /// Gets or sets the number of items on the IL stack at the start of the statement.
-            /// </summary>
-            public int OriginalStackSize;
-#endif
+            visitor(this);
         }
 
         /// <summary>
-        /// Generates CIL for the start of every statement.
+        /// Optimizes the expression tree.
+        /// </summary>
+        public virtual void Optimize()
+        {
+            Visit(statement =>
+                {
+                    if (statement != this)
+                        statement.Optimize();
+                });
+        }
+
+        /// <summary>
+        /// Generates CIL for the statement.
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        /// <param name="locals"> Variables common to both GenerateStartOfStatement() and GenerateEndOfStatement(). </param>
-        public void GenerateStartOfStatement(ILGenerator generator, OptimizationInfo optimizationInfo, StatementLocals locals)
+        public virtual void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-#if DEBUG && !SILVERLIGHT
+#if DEBUG
             // Statements must not produce or consume any values on the stack.
+            int originalStackSize = 0;
             if (generator is DynamicILGenerator)
-                locals.OriginalStackSize = ((DynamicILGenerator)generator).StackSize;
+                originalStackSize = ((DynamicILGenerator)generator).StackSize;
 #endif
 
-            if (locals.NonDefaultBreakStatementBehavior == false && this.HasLabels == true)
+            ILLabel endOfStatement = null;
+            if (this.HasLabels == true)
             {
                 // Set up the information needed by the break statement.
-                locals.EndOfStatement = generator.CreateLabel();
-                optimizationInfo.PushBreakOrContinueInfo(this.Labels, locals.EndOfStatement, null, labelledOnly: true);
+                endOfStatement = generator.CreateLabel();
+                optimizationInfo.PushBreakOrContinueInfo(this.Labels, endOfStatement, null, true);
             }
 
-            // Emit debugging information.
-            if (locals.NonDefaultDebugInfoBehavior == false && optimizationInfo.DebugDocument != null && this.DebugInfo != null)
-                generator.MarkSequencePoint(optimizationInfo.DebugDocument, this.DebugInfo);
-        }
+            // Generate the code.
+            this.GenerateCodeCore(generator, optimizationInfo);
 
-        /// <summary>
-        /// Generates CIL for the end of every statement.
-        /// </summary>
-        /// <param name="generator"> The generator to output the CIL to. </param>
-        /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        /// <param name="locals"> Variables common to both GenerateStartOfStatement() and GenerateEndOfStatement(). </param>
-        public void GenerateEndOfStatement(ILGenerator generator, OptimizationInfo optimizationInfo, StatementLocals locals)
-        {
-            if (locals.NonDefaultBreakStatementBehavior == false && this.HasLabels == true)
+            if (this.HasLabels == true)
             {
                 // Revert the information needed by the break statement.
-                generator.DefineLabelPosition(locals.EndOfStatement);
+                generator.DefineLabelPosition(endOfStatement);
                 optimizationInfo.PopBreakOrContinueInfo();
             }
 
-#if DEBUG && !SILVERLIGHT
+#if DEBUG
             // Check that the stack count is zero.
-            if (generator is DynamicILGenerator && ((DynamicILGenerator)generator).StackSize != locals.OriginalStackSize)
+            if (generator is DynamicILGenerator && ((DynamicILGenerator)generator).StackSize != originalStackSize)
                 throw new InvalidOperationException("Encountered unexpected stack imbalance.");
 #endif
+        }
+
+        /// <summary>
+        /// Generates CIL for the statement.
+        /// </summary>
+        /// <param name="generator"> The generator to output the CIL to. </param>
+        /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
+        protected virtual void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
+        {
         }
 
         /// <summary>

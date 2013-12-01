@@ -61,10 +61,10 @@ namespace Jurassic.Compiler
                         {
                             var lhs = this.Left.ResultType;
                             var rhs = this.Right.ResultType;
-                            if (lhs == PrimitiveType.String || rhs == PrimitiveType.String)
-                                return PrimitiveType.ConcatenatedString;
-                            if (lhs == PrimitiveType.ConcatenatedString || rhs == PrimitiveType.ConcatenatedString)
-                                return PrimitiveType.ConcatenatedString;
+                            if (lhs == PrimitiveType.String || lhs == PrimitiveType.ConcatenatedString ||
+                                rhs == PrimitiveType.String || rhs == PrimitiveType.ConcatenatedString)
+                                //return PrimitiveType.ConcatenatedString;
+                                return PrimitiveType.String;
                             if (lhs == PrimitiveType.Any || lhs == PrimitiveType.Object ||
                                 rhs == PrimitiveType.Any || rhs == PrimitiveType.Object)
                                 return PrimitiveType.Any;
@@ -130,7 +130,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // If a return value is not expected, generate only the side-effects.
             /*if (optimizationInfo.SuppressReturnValue == true)
@@ -298,12 +298,12 @@ namespace Jurassic.Compiler
                 case OperatorType.NotEqual:
                     generator.Call(ReflectionHelpers.TypeComparer_Equals);
                     generator.LoadBoolean(false);
-                    generator.CompareEqual();
+                    generator.Equal();
                     break;
                 case OperatorType.StrictlyNotEqual:
                     generator.Call(ReflectionHelpers.TypeComparer_StrictEquals);
                     generator.LoadBoolean(false);
-                    generator.CompareEqual();
+                    generator.Equal();
                     break;
 
                 default:
@@ -326,37 +326,36 @@ namespace Jurassic.Compiler
             // is a string, otherwise it adds two numbers.
             if (PrimitiveTypeUtilities.IsString(leftType) || PrimitiveTypeUtilities.IsString(rightType))
             {
-                // If at least one of the operands is a string, then the add operator concatenates.
+                // One or both of the operands are strings.
 
                 // Load the left-hand side onto the stack.
                 this.Left.GenerateCode(generator, optimizationInfo);
 
                 // Convert the operand to a concatenated string.
-                EmitConversion.ToPrimitive(generator, leftType, PrimitiveTypeHint.None);
-                EmitConversion.ToConcatenatedString(generator, leftType);
+                //EmitConversion.ToConcatenatedString(generator, leftType);
+
+                // Convert the operand to a string.
+                EmitConversion.ToString(generator, leftType);
 
                 // Load the right-hand side onto the stack.
                 this.Right.GenerateCode(generator, optimizationInfo);
 
-                if (rightType == PrimitiveType.String)
-                {
-                    // Concatenate the two strings.
-                    generator.Call(ReflectionHelpers.ConcatenatedString_Concatenate_String);
-                }
-                else if (rightType == PrimitiveType.ConcatenatedString)
-                {
-                    // Concatenate the two strings.
-                    generator.Call(ReflectionHelpers.ConcatenatedString_Concatenate_ConcatenatedString);
-                }
-                else
-                {
-                    // Convert the operand to an object.
-                    EmitConversion.ToPrimitive(generator, rightType, PrimitiveTypeHint.None);
-                    EmitConversion.ToAny(generator, rightType);
+                // Convert the operand to a string.
+                EmitConversion.ToString(generator, rightType);
 
-                    // Concatenate the two strings.
-                    generator.Call(ReflectionHelpers.ConcatenatedString_Concatenate_Object);
-                }
+                // Concatenate the two strings.
+                generator.Call(ReflectionHelpers.String_Concat);
+
+                //if (rightType == PrimitiveType.String)
+                //{
+                //    // Concatenate the two strings using ConcatenatedString.Append(string).
+                //    generator.Call(ReflectionHelpers.ConcatenatedString_Append_String);
+                //}
+                //else
+                //{
+                //    // Concatenate the two strings using ConcatenatedString.Append(ConcatenatedString).
+                //    generator.Call(ReflectionHelpers.ConcatenatedString_Append_ConcatenatedString);
+                //}
             }
             else if (leftType != PrimitiveType.Any && leftType != PrimitiveType.Object &&
                 rightType != PrimitiveType.Any && rightType != PrimitiveType.Object)
@@ -423,19 +422,19 @@ namespace Jurassic.Compiler
                 {
                     case OperatorType.LessThan:
                         generator.LoadInt32(0);
-                        generator.CompareLessThan();
+                        generator.LessThan();
                         break;
                     case OperatorType.LessThanOrEqual:
                         generator.LoadInt32(1);
-                        generator.CompareLessThan();
+                        generator.LessThan();
                         break;
                     case OperatorType.GreaterThan:
                         generator.LoadInt32(0);
-                        generator.CompareGreaterThan();
+                        generator.GreaterThan();
                         break;
                     case OperatorType.GreaterThanOrEqual:
                         generator.LoadInt32(-1);
-                        generator.CompareGreaterThan();
+                        generator.GreaterThan();
                         break;
                 }
             }
@@ -453,30 +452,32 @@ namespace Jurassic.Compiler
                 switch (this.OperatorType)
                 {
                     case OperatorType.LessThan:
-                        generator.CompareLessThan();
+                        generator.LessThan();
                         break;
                     case OperatorType.GreaterThan:
-                        generator.CompareGreaterThan();
+                        generator.GreaterThan();
                         break;
 
                     case OperatorType.LessThanOrEqual:
                         // a <= b   <-->   (a > b) == false
-                        generator.CompareGreaterThan();
+                        generator.GreaterThan();
                         generator.LoadBoolean(false);
-                        generator.CompareEqual();
+                        generator.Equal();
                         break;
 
                     case OperatorType.GreaterThanOrEqual:
                         // a >= b   <-->   (a < b) == false
-                        generator.CompareLessThan();
+                        generator.LessThan();
                         generator.LoadBoolean(false);
-                        generator.CompareEqual();
+                        generator.Equal();
                         break;
                 }
             }
-            else if (PrimitiveTypeUtilities.IsNumeric(leftType) || PrimitiveTypeUtilities.IsNumeric(rightType))
+            else if ((leftType != PrimitiveType.Any && leftType != PrimitiveType.Object)
+                || (rightType != PrimitiveType.Any && rightType != PrimitiveType.Object))
             {
-                // At least one of the operands is a number.
+                // At least one of the operands is not a string (or something that can be converted
+                // to a string).
 
                 // Load the left hand side operand onto the stack.
                 this.Left.GenerateCode(generator, optimizationInfo);
@@ -494,24 +495,24 @@ namespace Jurassic.Compiler
                 switch (this.OperatorType)
                 {
                     case OperatorType.LessThan:
-                        generator.CompareLessThan();
+                        generator.LessThan();
                         break;
                     case OperatorType.GreaterThan:
-                        generator.CompareGreaterThan();
+                        generator.GreaterThan();
                         break;
 
                     case OperatorType.LessThanOrEqual:
                         // a <= b   <-->   (a > b) == false
-                        generator.CompareGreaterThanUnsigned();
+                        generator.GreaterThanUnsigned();
                         generator.LoadBoolean(false);
-                        generator.CompareEqual();
+                        generator.Equal();
                         break;
 
                     case OperatorType.GreaterThanOrEqual:
                         // a >= b   <-->   (a < b) == false
-                        generator.CompareLessThanUnsigned();
+                        generator.LessThanUnsigned();
                         generator.LoadBoolean(false);
-                        generator.CompareEqual();
+                        generator.Equal();
                         break;
                 }
             }
@@ -530,19 +531,22 @@ namespace Jurassic.Compiler
                 switch (this.OperatorType)
                 {
                     case OperatorType.LessThan:
+                        generator.LoadBoolean(false);
                         generator.Call(ReflectionHelpers.TypeComparer_LessThan);
                         break;
 
                     case OperatorType.LessThanOrEqual:
+                        generator.LoadBoolean(false);
                         generator.Call(ReflectionHelpers.TypeComparer_LessThanOrEqual);
                         break;
 
                     case OperatorType.GreaterThan:
-                        generator.Call(ReflectionHelpers.TypeComparer_GreaterThan);
+                        generator.LoadBoolean(true);
+                        generator.Call(ReflectionHelpers.TypeComparer_LessThan);
                         break;
-
                     case OperatorType.GreaterThanOrEqual:
-                        generator.Call(ReflectionHelpers.TypeComparer_GreaterThanOrEqual);
+                        generator.LoadBoolean(true);
+                        generator.Call(ReflectionHelpers.TypeComparer_LessThanOrEqual);
                         break;
                 }
             }
@@ -612,15 +616,7 @@ namespace Jurassic.Compiler
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
         private void GenerateInstanceOf(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Emit the left-hand side expression and convert it to an object.
-            this.Left.GenerateCode(generator, optimizationInfo);
-            EmitConversion.ToAny(generator, this.Left.ResultType);
-
-            // Store the left-hand side expression in a temporary variable.
-            var temp = generator.CreateTemporaryVariable(typeof(object));
-            generator.StoreVariable(temp);
-
-            // Emit the right-hand side expression.
+            // Emit the right-hand side expression first.
             this.Right.GenerateCode(generator, optimizationInfo);
             EmitConversion.ToAny(generator, this.Right.ResultType);
 
@@ -633,7 +629,6 @@ namespace Jurassic.Compiler
             // Throw an nicely formatted exception.
             var rightValue = generator.CreateTemporaryVariable(typeof(object));
             generator.StoreVariable(rightValue);
-            EmitHelpers.LoadScriptEngine(generator);
             generator.LoadString("TypeError");
             generator.LoadString("The instanceof operator expected a function, but found '{0}' instead");
             generator.LoadInt32(1);
@@ -644,19 +639,17 @@ namespace Jurassic.Compiler
             generator.Call(ReflectionHelpers.TypeUtilities_TypeOf);
             generator.StoreArrayElement(typeof(object));
             generator.Call(ReflectionHelpers.String_Format);
-            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor_Error);
+            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor2);
             generator.Throw();
             generator.DefineLabelPosition(endOfTypeCheck);
             generator.ReleaseTemporaryVariable(rightValue);
 
-            // Load the left-hand side expression from the temporary variable.
-            generator.LoadVariable(temp);
+            // Emit the left-hand side expression and convert it to an object.
+            this.Left.GenerateCode(generator, optimizationInfo);
+            EmitConversion.ToAny(generator, this.Left.ResultType);
 
             // Call FunctionInstance.HasInstance(object)
             generator.Call(ReflectionHelpers.FunctionInstance_HasInstance);
-
-            // Allow the temporary variable to be reused.
-            generator.ReleaseTemporaryVariable(temp);
         }
 
         /// <summary>
@@ -666,15 +659,7 @@ namespace Jurassic.Compiler
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
         private void GenerateIn(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Emit the left-hand side expression and convert it to a string.
-            this.Left.GenerateCode(generator, optimizationInfo);
-            EmitConversion.ToString(generator, this.Left.ResultType);
-
-            // Store the left-hand side expression in a temporary variable.
-            var temp = generator.CreateTemporaryVariable(typeof(string));
-            generator.StoreVariable(temp);
-
-            // Emit the right-hand side expression.
+            // Emit the right-hand side expression first.
             this.Right.GenerateCode(generator, optimizationInfo);
             EmitConversion.ToAny(generator, this.Right.ResultType);
 
@@ -687,7 +672,6 @@ namespace Jurassic.Compiler
             // Throw an nicely formatted exception.
             var rightValue = generator.CreateTemporaryVariable(typeof(object));
             generator.StoreVariable(rightValue);
-            EmitHelpers.LoadScriptEngine(generator);
             generator.LoadString("TypeError");
             generator.LoadString("The in operator expected an object, but found '{0}' instead");
             generator.LoadInt32(1);
@@ -698,19 +682,17 @@ namespace Jurassic.Compiler
             generator.Call(ReflectionHelpers.TypeUtilities_TypeOf);
             generator.StoreArrayElement(typeof(object));
             generator.Call(ReflectionHelpers.String_Format);
-            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor_Error);
+            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor2);
             generator.Throw();
             generator.DefineLabelPosition(endOfTypeCheck);
             generator.ReleaseTemporaryVariable(rightValue);
 
-            // Load the left-hand side expression from the temporary variable.
-            generator.LoadVariable(temp);
+            // Emit the left-hand side expression and convert it to a string.
+            this.Left.GenerateCode(generator, optimizationInfo);
+            EmitConversion.ToString(generator, this.Left.ResultType);
 
             // Call ObjectInstance.HasProperty(object)
             generator.Call(ReflectionHelpers.ObjectInstance_HasProperty);
-
-            // Allow the temporary variable to be reused.
-            generator.ReleaseTemporaryVariable(temp);
         }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
@@ -7,7 +8,6 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents the information stored about a property in the class schema.
     /// </summary>
-    [Serializable]
     internal struct SchemaProperty
     {
         /// <summary>

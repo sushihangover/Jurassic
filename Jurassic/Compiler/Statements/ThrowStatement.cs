@@ -32,30 +32,14 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
-            // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals();
-            GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
-
-            // Emit code to throw the given value.
             this.Value.GenerateCode(generator, optimizationInfo);
             EmitConversion.ToAny(generator, this.Value.ResultType);
             generator.LoadInt32(0);
             generator.LoadNull();
-            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor_Object);
+            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor3);
             generator.Throw();
-
-            // Generate code for the end of the statement.
-            GenerateEndOfStatement(generator, optimizationInfo, statementLocals);
-        }
-
-        /// <summary>
-        /// Gets an enumerable list of child nodes in the abstract syntax tree.
-        /// </summary>
-        public override IEnumerable<AstNode> ChildNodes
-        {
-            get { yield return this.Value; }
         }
 
         /// <summary>

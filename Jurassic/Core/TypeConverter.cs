@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Jurassic.Library;
 
@@ -18,42 +19,6 @@ namespace Jurassic
     public static class TypeConverter
     {
         /// <summary>
-        /// Converts the given value to the given type.
-        /// </summary>
-        /// <param name="engine"> The script engine used to create new objects. </param>
-        /// <param name="value"> The value to convert. </param>
-        /// <typeparam name="T"> The type to convert the value to. </typeparam>
-        /// <returns> The converted value. </returns>
-        public static T ConvertTo<T>(ScriptEngine engine, object value)
-        {
-            return (T)ConvertTo(engine, value, typeof(T));
-        }
-
-        /// <summary>
-        /// Converts the given value to the given type.
-        /// </summary>
-        /// <param name="engine"> The script engine used to create new objects. </param>
-        /// <param name="value"> The value to convert. </param>
-        /// <param name="type"> The type to convert the value to. </param>
-        /// <returns> The converted value. </returns>
-        public static object ConvertTo(ScriptEngine engine, object value, Type type)
-        {
-            if (type == typeof(bool))
-                return ToBoolean(value);
-            if (type == typeof(int))
-                return ToInteger(value);
-            if (type == typeof(double))
-                return ToNumber(value);
-            if (type == typeof(string))
-                return ToString(value);
-            if (type == typeof(ObjectInstance))
-                return ToObject(engine, value);
-            if (type == typeof(object))
-                return value;
-            throw new ArgumentException(string.Format("Cannot convert to '{0}'.  The type is unsupported.", type), "value");
-        }
-
-        /// <summary>
         /// Converts any JavaScript value to a primitive boolean value.
         /// </summary>
         /// <param name="value"> The value to convert. </param>
@@ -68,8 +33,6 @@ namespace Jurassic
                 return (bool)value;
             if (value is int)
                 return ((int)value) != 0;
-            if (value is uint)
-                return ((uint)value) != 0;
             if (value is double)
                 return ((double)value) != 0 && double.IsNaN((double)value) == false;
             if (value is string)
@@ -78,7 +41,7 @@ namespace Jurassic
                 return ((ConcatenatedString)value).Length > 0;
             if (value is ObjectInstance)
                 return true;
-            throw new ArgumentException(string.Format("Cannot convert object of type '{0}' to a boolean.", value.GetType()), "value");
+            throw new ArgumentException("Unexpected type.", "value");
         }
 
         /// <summary>
@@ -101,18 +64,13 @@ namespace Jurassic
             if (value is bool)
                 return (bool)value ? 1 : 0;
             if (value is string)
-                return NumberParser.CoerceToNumber((string)value);
+                return GlobalObject.ParseNumber((string)value, allowHexPrefix: true, allowTrailingJunk: false, returnZeroIfEmpty: true);
             if (value is ConcatenatedString)
-                return NumberParser.CoerceToNumber(value.ToString());
+                return GlobalObject.ParseNumber(((ConcatenatedString)value).ToString(), allowHexPrefix: true, allowTrailingJunk: false, returnZeroIfEmpty: true);
             if (value is ObjectInstance)
                 return ToNumber(ToPrimitive(value, PrimitiveTypeHint.Number));
-            throw new ArgumentException(string.Format("Cannot convert object of type '{0}' to a number.", value.GetType()), "value");
+            throw new ArgumentException("Unexpected type.", "value");
         }
-
-        // Single-item cache.
-        private static object cacheLock = new object();
-        private static double cacheValue;
-        private static string cacheResult = "0";
 
         /// <summary>
         /// Converts any JavaScript value to a primitive string value.
@@ -129,93 +87,52 @@ namespace Jurassic
                 return (bool)value ? "true" : "false";
             if (value is int)
                 return ((int)value).ToString();
-            if (value is uint)
-                return ((uint)value).ToString();
             if (value is double)
-            {
-                // Check if the value is in the cache.
-                double doubleValue = (double)value;
-                lock (cacheLock)
-                {
-                    if (doubleValue == cacheValue)
-                        return cacheResult;
-                }
-
-                // Convert the number to a string.
-                var result = NumberFormatter.ToString(doubleValue, 10, NumberFormatter.Style.Regular);
-
-                // Cache the result.
-                lock (cacheLock)
-                {
-                    cacheValue = doubleValue;
-                    cacheResult = result;
-                }
-
-                return result;
-            }
+                return ((double)value).ToString();
             if (value is string)
                 return (string)value;
             if (value is ConcatenatedString)
-                return value.ToString();
+                return ((ConcatenatedString)value).ToString();
             if (value is ObjectInstance)
                 return ToString(ToPrimitive(value, PrimitiveTypeHint.String));
-            throw new ArgumentException(string.Format("Cannot convert object of type '{0}' to a string.", value.GetType()), "value");
-        }
-
-        /// <summary>
-        /// Converts any JavaScript value to a concatenated string value.
-        /// </summary>
-        /// <param name="value"> The value to convert. </param>
-        /// <returns> A concatenated string value. </returns>
-        public static ConcatenatedString ToConcatenatedString(object value)
-        {
-            if (value is ConcatenatedString)
-                return (ConcatenatedString)value;
-            return new ConcatenatedString(ToString(value));
+            throw new ArgumentException("Unexpected type.", "value");
         }
 
         /// <summary>
         /// Converts any JavaScript value to an object.
         /// </summary>
-        /// <param name="engine"> The script engine used to create new objects. </param>
         /// <param name="value"> The value to convert. </param>
         /// <returns> An object. </returns>
-        public static ObjectInstance ToObject(ScriptEngine engine, object value)
+        public static ObjectInstance ToObject(object value)
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
             if (value is ObjectInstance)
                 return (ObjectInstance)value;
             if (value == null || value == Undefined.Value)
-                throw new JavaScriptException(engine, "TypeError", "undefined cannot be converted to an object");
+                throw new JavaScriptException("TypeError", "undefined cannot be converted to an object");
             if (value == Null.Value)
-                throw new JavaScriptException(engine, "TypeError", "null cannot be converted to an object");
+                throw new JavaScriptException("TypeError", "null cannot be converted to an object");
             if (value is bool)
-                return engine.Boolean.Construct((bool)value);
+                return GlobalObject.Boolean.Construct((bool)value);
             if (value is int)
-                return engine.Number.Construct((int)value);
-            if (value is uint)
-                return engine.Number.Construct((uint)value);
+                return GlobalObject.Number.Construct((int)value);
             if (value is double)
-                return engine.Number.Construct((double)value);
+                return GlobalObject.Number.Construct((double)value);
             if (value is string)
-                return engine.String.Construct((string)value);
+                return GlobalObject.String.Construct((string)value);
             if (value is ConcatenatedString)
-                return engine.String.Construct(value.ToString());
-            throw new ArgumentException(string.Format("Cannot convert object of type '{0}' to an object.", value.GetType()), "value");
+                return GlobalObject.String.Construct(((ConcatenatedString)value).ToString());
+            throw new ArgumentException("Unexpected type.", "value");
         }
 
         /// <summary>
         /// Converts any JavaScript value to a primitive value.
         /// </summary>
         /// <param name="value"> The value to convert. </param>
-        /// <param name="preferredType"> Specifies whether toString() or valueOf() should be
-        /// preferred when converting to a primitive. </param>
         /// <returns> A primitive (non-object) value. </returns>
-        public static object ToPrimitive(object value, PrimitiveTypeHint preferredType)
+        public static object ToPrimitive(object value, PrimitiveTypeHint typeHint)
         {
             if (value is ObjectInstance)
-                return ((ObjectInstance)value).GetPrimitiveValue(preferredType);
+                return ((ObjectInstance)value).GetPrimitiveValue(typeHint);
             else
                 return value;
         }

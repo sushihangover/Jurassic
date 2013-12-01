@@ -7,10 +7,8 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents a JavaScript function that throws a type error.
     /// </summary>
-    [Serializable]
-    internal sealed class ThrowTypeErrorFunction : FunctionInstance
+    internal class ThrowTypeErrorFunction : FunctionInstance
     {
-        [NonSerialized]
         private FunctionDelegate body;
 
 
@@ -27,35 +25,11 @@ namespace Jurassic.Library
         {
             this.FastSetProperty("length", 0);
             this.IsExtensible = false;
-            this.body = new FunctionDelegate((engine, scope, thisObject, functionObject, argumentValues) =>
+            this.body = new FunctionDelegate((scope, thisObject, functionObject, argumentValues) =>
                 {
-                    throw new JavaScriptException(this.Engine, "TypeError", "It is illegal to access the 'callee' or 'caller' property in strict mode");
+                    throw new JavaScriptException("TypeError", "It is illegal to access the 'callee' or 'caller' property in strict mode");
                 });
         }
-
-
-
-        //     SERIALIZATION
-        //_________________________________________________________________________________________
-
-#if !SILVERLIGHT
-
-        /// <summary>
-        /// Runs when the entire object graph has been deserialized.
-        /// </summary>
-        /// <remarks> Derived classes must call the base class implementation. </remarks>
-        protected override void OnDeserializationCallback()
-        {
-            // Call the base class.
-            base.OnDeserializationCallback();
-
-            this.body = new FunctionDelegate((engine, scope, thisObject, functionObject, argumentValues) =>
-            {
-                throw new JavaScriptException(this.Engine, "TypeError", "It is illegal to access the 'callee' or 'caller' property in strict mode");
-            });
-        }
-
-#endif
 
 
 
@@ -70,7 +44,7 @@ namespace Jurassic.Library
         /// <returns> The value that was returned from the function. </returns>
         public override object CallLateBound(object thisObject, params object[] argumentValues)
         {
-            return this.body(this.Engine, null, thisObject, this, argumentValues);
+            return this.body(null, thisObject, this, argumentValues);
         }
 
         /// <summary>

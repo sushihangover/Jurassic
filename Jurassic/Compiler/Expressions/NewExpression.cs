@@ -47,7 +47,7 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="generator"> The generator to output the CIL to. </param>
         /// <param name="optimizationInfo"> Information about any optimizations that should be performed. </param>
-        public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
+        protected override void GenerateCodeCore(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // Note: we use GetRawOperand() so that grouping operators are not ignored.
             var operand = this.GetRawOperand(0);
@@ -78,7 +78,6 @@ namespace Jurassic.Compiler
             // Throw an nicely formatted exception.
             var targetValue = generator.CreateTemporaryVariable(typeof(object));
             generator.StoreVariable(targetValue);
-            EmitHelpers.LoadScriptEngine(generator);
             generator.LoadString("TypeError");
             generator.LoadString("The new operator requires a function, found a '{0}' instead");
             generator.LoadInt32(1);
@@ -89,7 +88,7 @@ namespace Jurassic.Compiler
             generator.Call(ReflectionHelpers.TypeUtilities_TypeOf);
             generator.StoreArrayElement(typeof(object));
             generator.Call(ReflectionHelpers.String_Format);
-            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor_Error);
+            generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor2);
             generator.Throw();
             generator.DefineLabelPosition(endOfTypeCheck);
             generator.ReleaseTemporaryVariable(targetValue);

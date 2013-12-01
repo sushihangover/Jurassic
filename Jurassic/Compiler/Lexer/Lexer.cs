@@ -9,22 +9,22 @@ namespace Jurassic.Compiler
     /// <summary>
     /// Represents the current expression state of the parser.
     /// </summary>
-    internal enum ParserExpressionState
+    public enum ExpressionState
     {
         /// <summary>
         /// Indicates the context is not known.  The lexer will guess.
         /// </summary>
-        Unknown,
+        UnknownContext,
 
         /// <summary>
         /// Indicates the next token can be a literal.
         /// </summary>
-        Literal,
+        LiteralContext,
 
         /// <summary>
         /// Indicates the next token can be an operator.
         /// </summary>
-        Operator,
+        OperatorContext,
     }
 
     /// <summary>
@@ -32,35 +32,30 @@ namespace Jurassic.Compiler
     /// </summary>
     internal class Lexer
     {
-        private ScriptEngine engine;
-        private ScriptSource source;
         private TextReader reader;
-        private int lineNumber, columnNumber;
+        private int lineNumber;
+        private string sourcePath;
 
         /// <summary>
         /// Creates a Lexer instance with the given source of text.
         /// </summary>
-        /// <param name="engine"> The associated script engine. </param>
-        /// <param name="source"> The source of javascript code. </param>
-        public Lexer(ScriptEngine engine, ScriptSource source)
+        /// <param name="reader"> A reader that will supply the javascript source code. </param>
+        /// <param name="sourcePath"> The path or URL of the source file.  Can be <c>null</c>. </param>
+        public Lexer(TextReader reader, string sourcePath)
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
-            if (source == null)
-                throw new ArgumentNullException("source");
-            this.engine = engine;
-            this.source = source;
-            this.reader = source.GetReader();
+            if (reader == null)
+                throw new ArgumentNullException("reader");
+            this.reader = reader;
             this.lineNumber = 1;
-            this.columnNumber = 1;
+            this.sourcePath = sourcePath;
         }
 
         /// <summary>
         /// Gets the reader that was supplied to the constructor.
         /// </summary>
-        public ScriptSource Source
+        public TextReader Reader
         {
-            get { return this.source; }
+            get { return this.reader; }
         }
 
         /// <summary>
@@ -72,11 +67,11 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Gets the column number of the start of the next token.
+        /// Gets the path or URL of the source file.  Can be <c>null</c>.
         /// </summary>
-        public int ColumnNumber
+        public string SourcePath
         {
-            get { return this.columnNumber; }
+            get { return this.sourcePath; }
         }
 
         /// <summary>
@@ -84,43 +79,10 @@ namespace Jurassic.Compiler
         /// an operator is valid as the next token.  This is only required to disambiguate the
         /// slash symbol (/) which can be a division operator or a regular expression literal.
         /// </summary>
-        public ParserExpressionState ParserExpressionState
+        public Func<ExpressionState> ExpressionStateCallback
         {
             get;
             set;
-        }
-
-        /// <summary>
-        /// Gets or sets a value that indicates whether the lexer should operate in strict mode.
-        /// </summary>
-        public bool StrictMode
-        {
-            get;
-            set;
-        }
-
-        /// <summary>
-        /// Gets or sets a string builder that will be appended with characters as they are read
-        /// from the input stream.
-        /// </summary>
-        public StringBuilder InputCaptureStringBuilder
-        {
-            get;
-            set;
-        }
-
-        /// <summary>
-        /// Reads the next character from the input stream.
-        /// </summary>
-        /// <returns> The character that was read, or <c>-1</c> if the end of the input stream has
-        /// been reached. </returns>
-        private int ReadNextChar()
-        {
-            this.columnNumber++;
-            int c = this.reader.Read();
-            if (this.InputCaptureStringBuilder != null && c >= 0)
-                this.InputCaptureStringBuilder.Append((char)c);
-            return c;
         }
 
         // Needed to disambiguate regular expressions.
@@ -132,57 +94,64 @@ namespace Jurassic.Compiler
         /// <returns> A token, or <c>null</c> if there are no more tokens. </returns>
         public Token NextToken()
         {
-            int c1 = ReadNextChar();
+            Token token = null;
+            do
+            {
+                int c1 = this.reader.Read();
 
-            if (IsPunctuatorStartChar(c1) == true)
-            {
-                // Punctuator (puntcuation + operators).
-                this.lastSignificantToken = ReadPunctuator(c1);
-                return this.lastSignificantToken;
-            }
-            else if (IsWhiteSpace(c1) == true)
-            {
-                // White space.
-                return ReadWhiteSpace();
-            }
-            else if (IsIdentifierStartChar(c1) == true)
-            {
-                // Identifier or reserved word.
-                this.lastSignificantToken = ReadIdentifier(c1);
-                return this.lastSignificantToken;
-            }
-            else if (IsStringLiteralStartChar(c1) == true)
-            {
-                // String literal.
-                this.lastSignificantToken = ReadStringLiteral(c1);
-                return this.lastSignificantToken;
-            }
-            else if (IsNumericLiteralStartChar(c1) == true)
-            {
-                // Number literal.
-                this.lastSignificantToken = ReadNumericLiteral(c1);
-                return this.lastSignificantToken;
-            }
-            else if (IsLineTerminator(c1) == true)
-            {
-                // Line Terminator.
-                this.lastSignificantToken = ReadLineTerminator(c1);
-                return this.lastSignificantToken;
-            }
-            else if (c1 == '/')
-            {
-                // Comment or divide or regular expression.
-                this.lastSignificantToken = ReadDivideCommentOrRegularExpression();
-                return this.lastSignificantToken;
-            }
-            else if (c1 == -1)
-            {
-                // End of input.
-                this.lastSignificantToken = null;
-                return null;
-            }
-            else
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Unexpected character '{0}'.", (char)c1), this.lineNumber, this.Source.Path);
+                if (IsPunctuatorStartChar(c1) == true)
+                {
+                    // Punctuator (puntcuation + operators).
+                    token = ReadPunctuator(c1);
+                }
+                else if (IsWhiteSpace(c1) == true)
+                {
+                    // White space.
+                    token = ReadWhiteSpace();
+                }
+                else if (IsIdentifierStartChar(c1) == true)
+                {
+                    // Identifier or reserved word.
+                    token = ReadIdentifier(c1);
+                }
+                else if (IsStringLiteralStartChar(c1) == true)
+                {
+                    // String literal.
+                    token = ReadStringLiteral(c1);
+                }
+                else if (IsNumericLiteralStartChar(c1) == true)
+                {
+                    // Number literal.
+                    token = ReadNumericLiteral(c1);
+                }
+                else if (IsLineTerminator(c1) == true)
+                {
+                    // Line Terminator.
+                    token = ReadLineTerminator(c1);
+                }
+                else if (c1 == '/')
+                {
+                    // Comment or divide or regular expression.
+                    token = ReadDivideCommentOrRegularExpression();
+                }
+                else if (c1 == -1)
+                {
+                    // End of input.
+                    this.lastSignificantToken = null;
+                    return null;
+                }
+                else
+                    throw new JavaScriptException("SyntaxError", string.Format("Unexpected character '{0}'.", (char)c1), this.lineNumber, this.sourcePath);
+
+                // Record the last non-whitespace token.
+                if (token != null && (token is WhiteSpaceToken) == false)
+                {
+                    this.lastSignificantToken = token;
+                }
+
+            } while (token == null);
+
+            return token;
         }
 
         /// <summary>
@@ -197,11 +166,11 @@ namespace Jurassic.Compiler
             if (firstChar == '\\')
             {
                 // Unicode escape sequence.
-                if (ReadNextChar() != 'u')
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid escape sequence in identifier.", this.lineNumber, this.Source.Path);
-                firstChar = ReadHexEscapeSequence(4);
+                if (this.reader.Read() != 'u')
+                    throw new JavaScriptException("SyntaxError", "Invalid escape sequence in identifier.", this.lineNumber, this.sourcePath);
+                firstChar = ReadHexNumber(4);
                 if (IsIdentifierChar(firstChar) == false)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid character in identifier.", this.lineNumber, this.Source.Path);
+                    throw new JavaScriptException("SyntaxError", "Invalid character in identifier.", this.lineNumber, this.sourcePath);
             }
             name.Append((char)firstChar);
 
@@ -215,12 +184,12 @@ namespace Jurassic.Compiler
                 if (c == '\\')
                 {
                     // Unicode escape sequence.
-                    ReadNextChar();
-                    if (ReadNextChar() != 'u')
-                        throw new JavaScriptException(this.engine, "SyntaxError", "Invalid escape sequence in identifier.", this.lineNumber, this.Source.Path);
-                    c = ReadHexEscapeSequence(4);
+                    this.reader.Read();
+                    if (this.reader.Read() != 'u')
+                        throw new JavaScriptException("SyntaxError", "Invalid escape sequence in identifier.", this.lineNumber, this.sourcePath);
+                    c = ReadHexNumber(4);
                     if (IsIdentifierChar(c) == false)
-                        throw new JavaScriptException(this.engine, "SyntaxError", "Invalid character in identifier.", this.lineNumber, this.Source.Path);
+                        throw new JavaScriptException("SyntaxError", "Invalid character in identifier.", this.lineNumber, this.sourcePath);
                     name.Append((char)c);
                 }
                 else
@@ -229,12 +198,12 @@ namespace Jurassic.Compiler
                     name.Append((char)c);
 
                     // Advance the input stream.
-                    ReadNextChar();
+                    this.reader.Read();
                 }
             }
 
             // Check if the identifier is actually a keyword, boolean literal, or null literal.
-            return KeywordToken.FromString(name.ToString(), this.engine.CompatibilityMode, this.StrictMode);
+            return KeywordToken.FromString(name.ToString());
         }
 
         /// <summary>
@@ -266,37 +235,9 @@ namespace Jurassic.Compiler
                 punctuator = longPunctuator;
 
                 // Advance the input stream.
-                ReadNextChar();
+                this.reader.Read();
             }
             return punctuator;
-        }
-
-        /// <summary>
-        /// Wraps an existing TextReader and logs all characters to the given StringBuilder.
-        /// </summary>
-        private class CapturingReader : TextReader
-        {
-            private TextReader baseReader;
-            private StringBuilder inputCaptureBuilder;
-
-            public CapturingReader(TextReader baseReader, StringBuilder inputCaptureBuilder)
-            {
-                this.baseReader = baseReader;
-                this.inputCaptureBuilder = inputCaptureBuilder;
-            }
-
-            public override int Read()
-            {
-                int c = this.baseReader.Read();
-                if (c >= 0)
-                    this.inputCaptureBuilder.Append((char)c);
-                return c;
-            }
-
-            public override int Peek()
-            {
-                return this.baseReader.Peek();
-            }
         }
 
         /// <summary>
@@ -306,35 +247,102 @@ namespace Jurassic.Compiler
         /// <returns> A numeric literal token. </returns>
         private Token ReadNumericLiteral(int firstChar)
         {
-            // If this.InputCaptureStringBuilder is not null, wrap the text reader so that
-            // characters are captured even though ReadNextChar() is not called.
-            var reader = this.reader;
-            if (this.InputCaptureStringBuilder != null)
-                reader = new CapturingReader(reader, this.InputCaptureStringBuilder);
+            double result;
 
-            NumberParser.ParseCoreStatus status;
-            double result = NumberParser.ParseCore(reader, (char)firstChar, out status);
-
-            // Handle various error cases.
-            switch (status)
+            // If the number starts with '0x' or '0X' then the number should be parsed as a hex
+            // number.
+            if (firstChar == '0')
             {
-                case NumberParser.ParseCoreStatus.NoDigits:
-                    // If the number consists solely of a period, return that as a token.
-                    return PunctuatorToken.Dot;
-                case NumberParser.ParseCoreStatus.NoExponent:
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid number.", this.lineNumber, this.Source.Path);
-                case NumberParser.ParseCoreStatus.InvalidHexLiteral:
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid hexidecimal constant.", this.lineNumber, this.Source.Path);
-                case NumberParser.ParseCoreStatus.OctalLiteral:
-                    // Octal number are only supported in ECMAScript 3 compatibility mode.
-                    if (this.engine.CompatibilityMode != CompatibilityMode.ECMAScript3)
-                        throw new JavaScriptException(this.engine, "SyntaxError", "Octal numbers are not supported.", this.lineNumber, this.Source.Path);
-                    break;
-                case NumberParser.ParseCoreStatus.InvalidOctalLiteral:
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid octal constant.", this.lineNumber, this.Source.Path);
+                // Read the next char - should be 'x' or 'X' if this is a hex number (could be just '0').
+                int c = this.reader.Peek();
+                if (c == 'x' || c == 'X')
+                {
+                    this.reader.Read();
+
+                    // Read numeric digits 0-9, a-z or A-Z.
+                    result = 0;
+                    while (true)
+                    {
+                        c = this.reader.Peek();
+                        if (c >= '0' && c <= '9')
+                            result = result * 16 + c - '0';
+                        else if (c >= 'a' && c <= 'f')
+                            result = result * 16 + c - 'a' + 10;
+                        else if (c >= 'A' && c <= 'F')
+                            result = result * 16 + c - 'A' + 10;
+                        else
+                            break;
+                        this.reader.Read();
+                    }
+
+                    if (result == (double)(int)result)
+                        return new LiteralToken((int)result);
+                    return new LiteralToken(result);
+                }
             }
 
-            // Return the result as an integer if possible, otherwise return it as a double.
+            // Read the integer component.
+            int digitsRead;
+            if (firstChar == '.')
+                result = double.NaN;
+            else
+                result = ReadInteger(firstChar - '0', out digitsRead);
+
+            if (firstChar == '.' || this.reader.Peek() == '.')
+            {
+                // Skip past the '.'.
+                if (firstChar != '.')
+                    this.reader.Read();
+
+                // Read the fractional component.
+                double fraction = ReadInteger(0.0, out digitsRead);
+
+                // Check a number was actually provided.
+                if (double.IsNaN(result) == true && digitsRead == 0)
+                    return PunctuatorToken.Dot;
+
+                // '.5' should return 0.5.
+                if (double.IsNaN(result) == true)
+                    result = 0;
+
+                // '5.' should return 5.0.
+                if (digitsRead > 0)
+                {
+                    // Apply the fractional component.
+                    result += fraction / System.Math.Pow(10, digitsRead);
+                }
+            }
+
+            if (reader.Peek() == 'e' || reader.Peek() == 'E')
+            {
+                // Skip past the 'e'.
+                reader.Read();
+
+                // Read the sign of the exponent.
+                double exponentSign = 1.0;
+                int c = this.reader.Peek();
+                if (c == '+')
+                    this.reader.Read();
+                else if (c == '-')
+                {
+                    this.reader.Read();
+                    exponentSign = -1.0;
+                }
+
+                // Read the exponent.
+                double exponent = ReadInteger(0.0, out digitsRead) * exponentSign;
+
+                // Check a number was actually provided.
+                if (double.IsNaN(result) == true || digitsRead == 0)
+                    throw new JavaScriptException("SyntaxError", "Invalid number.", this.lineNumber, this.sourcePath);
+
+                // Apply the exponent.
+                if (exponent >= 0)
+                    result *= System.Math.Pow(10, exponent);
+                else
+                    result /= System.Math.Pow(10, -exponent);
+            }
+
             if (result == (double)(int)result)
                 return new LiteralToken((int)result);
             return new LiteralToken(result);
@@ -356,7 +364,7 @@ namespace Jurassic.Compiler
                 int c = this.reader.Peek();
                 if (c < '0' || c > '9')
                     break;
-                ReadNextChar();
+                this.reader.Read();
                 digitsRead++;
                 result = result * 10 + (c - '0');
             }
@@ -374,20 +382,19 @@ namespace Jurassic.Compiler
             System.Diagnostics.Debug.Assert(firstChar == '\'' || firstChar == '"');
             var contents = new StringBuilder();
             int lineTerminatorCount = 0;
-            int escapeSequenceCount = 0;
             while (true)
             {
-                int c = ReadNextChar();
+                int c = this.reader.Read();
                 if (c == firstChar)
                     break;
                 if (c == -1)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected end of input in string literal.", this.lineNumber, this.Source.Path);
+                    throw new JavaScriptException("SyntaxError", "Unexpected end of input in string literal.", this.lineNumber, this.sourcePath);
                 if (IsLineTerminator(c))
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected line terminator in string literal.", this.lineNumber, this.Source.Path);
+                    throw new JavaScriptException("SyntaxError", "Unexpected line terminator in string literal.", this.lineNumber, this.sourcePath);
                 if (c == '\\')
                 {
                     // Escape sequence or line continuation.
-                    c = ReadNextChar();
+                    c = this.reader.Read();
                     if (IsLineTerminator(c))
                     {
                         // Line continuation.
@@ -399,7 +406,6 @@ namespace Jurassic.Compiler
 
                         // Increment the internal line number so errors can be tracked properly.
                         this.lineNumber++;
-                        this.columnNumber = 1;
                     }
                     else
                     {
@@ -432,38 +438,20 @@ namespace Jurassic.Compiler
                                 break;
                             case 'x':
                                 // ASCII escape.
-                                contents.Append(ReadHexEscapeSequence(2));
+                                contents.Append(ReadHexNumber(2));
                                 break;
                             case 'u':
                                 // Unicode escape.
-                                contents.Append(ReadHexEscapeSequence(4));
+                                contents.Append(ReadHexNumber(4));
                                 break;
                             case '0':
-                                // Null character or octal escape sequence.
-                                c = this.reader.Peek();
-                                if (c >= '0' && c <= '9')
-                                    contents.Append(ReadOctalEscapeSequence(0));
-                                else
-                                    contents.Append((char)0);
+                                // Zero.
+                                contents.Append((char)0);
                                 break;
-                            case '1':
-                            case '2':
-                            case '3':
-                            case '4':
-                            case '5':
-                            case '6':
-                            case '7':
-                                // Octal escape sequence.
-                                contents.Append(ReadOctalEscapeSequence(c - '0'));
-                                break;
-                            case '8':
-                            case '9':
-                                throw new JavaScriptException(this.engine, "SyntaxError", "Invalid octal escape sequence.", this.lineNumber, this.Source.Path);
                             default:
                                 contents.Append((char)c);
                                 break;
                         }
-                        escapeSequenceCount ++;
                     }
                 }
                 else
@@ -471,7 +459,9 @@ namespace Jurassic.Compiler
                     contents.Append((char)c);
                 }
             }
-            return new StringLiteralToken(contents.ToString(), escapeSequenceCount, lineTerminatorCount);
+            if (lineTerminatorCount > 0)
+                return new MultiLineLiteralToken(contents.ToString(), lineTerminatorCount);
+            return new LiteralToken(contents.ToString());
         }
 
         /// <summary>
@@ -479,44 +469,17 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <returns> The character corresponding to the escape sequence, or the content that was read
         /// from the input if a valid hex number was not read. </returns>
-        private char ReadHexEscapeSequence(int digitCount)
+        private char ReadHexNumber(int digitCount)
         {
             var contents = new StringBuilder(digitCount);
             for (int i = 0; i < digitCount; i++)
             {
-                int c = ReadNextChar();
+                int c = this.reader.Read();
                 contents.Append((char)c);
                 if (IsHexDigit(c) == false)
-                    throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Invalid hex digit '{0}' in escape sequence.", (char)c), this.lineNumber, this.Source.Path);
+                    throw new JavaScriptException("SyntaxError", string.Format("Invalid hex digit '{0}' in escape sequence.", (char)c), this.lineNumber, this.sourcePath);
             }
             return (char)int.Parse(contents.ToString(), System.Globalization.NumberStyles.HexNumber);
-        }
-
-        /// <summary>
-        /// Reads an octal number turns it into a single-byte character.
-        /// </summary>
-        /// <param name="firstDigit"> The value of the first digit. </param>
-        /// <returns> The character corresponding to the escape sequence. </returns>
-        private char ReadOctalEscapeSequence(int firstDigit)
-        {
-            // Octal escape sequences are only supported in ECMAScript 3 compatibility mode.
-            if (this.engine.CompatibilityMode != CompatibilityMode.ECMAScript3)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Octal escape sequences are only supported in ECMAScript 3 compatibility mode.", this.lineNumber, this.Source.Path);
-
-            int numericValue = firstDigit;
-            for (int i = 0; i < 2; i++)
-            {
-                int c = this.reader.Peek();
-                if (c < '0' || c > '9')
-                    break;
-                if (c == '8' || c == '9')
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid octal escape sequence.", this.lineNumber, this.Source.Path);
-                numericValue = numericValue * 8 + (c - '0');
-                ReadNextChar();
-                if (numericValue * 8 > 255)
-                    break;
-            }
-            return (char)numericValue;
         }
 
         /// <summary>
@@ -532,10 +495,10 @@ namespace Jurassic.Compiler
                 int c = this.reader.Peek();
                 if (IsLineTerminator(c) || c == -1)
                     break;
-                ReadNextChar();
+                this.reader.Read();
             }
 
-            return new WhiteSpaceToken(0);
+            return null;
         }
 
         /// <summary>
@@ -551,14 +514,14 @@ namespace Jurassic.Compiler
             int lineTerminatorCount = 0;
 
             // Read the first character.
-            int c1 = ReadNextChar();
+            int c1 = this.reader.Read();
             if (c1 == -1)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected end of input in multi-line comment.", this.lineNumber, this.Source.Path);
+                throw new JavaScriptException("SyntaxError", "Unexpected end of input in multi-line comment.", this.lineNumber, this.sourcePath);
 
             // Read all the characters up to the "*/".
             while (true)
             {
-                int c2 = ReadNextChar();
+                int c2 = this.reader.Read();
 
                 if (IsLineTerminator(c1) == true)
                 {
@@ -568,14 +531,11 @@ namespace Jurassic.Compiler
 
                     // Increment the internal line number so errors can be tracked properly.
                     this.lineNumber++;
-                    this.columnNumber = 1;
 
                     // If the sequence is CRLF then only count that as one new line rather than two.
                     if (c1 == 0x0D && c2 == 0x0A)   // CRLF
-                        c1 = c2 = ReadNextChar();
+                        c1 = c2 = this.reader.Read();
                 }
-                else if (c2 == -1)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected end of input in multi-line comment.", this.lineNumber, this.Source.Path);
 
                 // Look for */ combination.
                 if (c1 == '*' && c2 == '/')
@@ -583,7 +543,7 @@ namespace Jurassic.Compiler
                 c1 = c2;
             }
 
-            return new WhiteSpaceToken(lineTerminatorCount);
+            return lineTerminatorCount > 0 ? new WhiteSpaceToken(lineTerminatorCount) : null;
         }
 
         /// <summary>
@@ -600,9 +560,9 @@ namespace Jurassic.Compiler
                     break;
 
                 // Advance the reader.
-                ReadNextChar();
+                this.reader.Read();
             }
-            return new WhiteSpaceToken(0);
+            return null;
         }
 
         /// <summary>
@@ -615,11 +575,10 @@ namespace Jurassic.Compiler
             // Check for a CRLF sequence, if so that counts as one line terminator and not two.
             int c = this.reader.Peek();
             if (firstChar == 0x0D && c == 0x0A)   // CRLF
-                ReadNextChar();
+                this.reader.Read();
 
             // Increment the internal line number so errors can be tracked properly.
             this.lineNumber++;
-            this.columnNumber = 1;
 
             // Return a line terminator token.
             return new WhiteSpaceToken(1);
@@ -639,7 +598,7 @@ namespace Jurassic.Compiler
                 // Multi-line comment.
 
                 // Skip the asterisk.
-                ReadNextChar();
+                this.reader.Read();
 
                 return ReadMultiLineComment();
             }
@@ -648,7 +607,7 @@ namespace Jurassic.Compiler
                 // Single-line comment.
 
                 // Skip the slash.
-                ReadNextChar();
+                this.reader.Read();
 
                 return ReadSingleLineComment();
             }
@@ -656,15 +615,20 @@ namespace Jurassic.Compiler
             {
                 // Divide or regular expression.
 
+                // Get the current parser context.
+                var parserContext = ExpressionState.UnknownContext;
+                if (this.ExpressionStateCallback != null)
+                    parserContext = this.ExpressionStateCallback();
+
                 // Determine from the context whether the token is a regular expression
                 // or a division operator.
                 bool isDivisionOperator;
-                switch (this.ParserExpressionState)
+                switch (parserContext)
                 {
-                    case ParserExpressionState.Literal:
+                    case ExpressionState.LiteralContext:
                         isDivisionOperator = false;
                         break;
-                    case ParserExpressionState.Operator:
+                    case ExpressionState.OperatorContext:
                         isDivisionOperator = true;
                         break;
                     default:
@@ -687,7 +651,7 @@ namespace Jurassic.Compiler
                     // Two division operators: "/" and "/=".
                     if (c2 == '=')
                     {
-                        ReadNextChar();
+                        this.reader.Read();
                         return PunctuatorToken.CompoundDivide;
                     }
                     else
@@ -714,62 +678,35 @@ namespace Jurassic.Compiler
             bool insideCharacterClass = false;
             while (true)
             {
-                // Read the next character.
-                int c = ReadNextChar();
-
-                // Check for special cases.
+                int c = this.reader.Read();
                 if (c == '/' && insideCharacterClass == false)
                     break;
-                else if (c == '\\')
+                if (c == -1)
+                    throw new JavaScriptException("SyntaxError", "Unexpected end of input in regular expression literal.", this.lineNumber, this.sourcePath);
+                if (IsLineTerminator(c))
+                    throw new JavaScriptException("SyntaxError", "Unexpected line terminator in regular expression literal.", this.lineNumber, this.sourcePath);
+                if (c == '\\')
                 {
-                    // Escape sequence.  Escaped characters are never special.
+                    // Escape sequence.
                     body.Append((char)c);
-                    c = ReadNextChar();
+                    c = this.reader.Read();
                 }
                 else if (c == '[')
                     insideCharacterClass = true;
                 else if (c == ']')
                     insideCharacterClass = false;
-                
-                // Note: a line terminator or EOF is not allowed in a regular expression, even if
-                // it is escaped with a backslash.  Therefore, these checks have to come after the
-                // checks above.
-                if (IsLineTerminator(c))
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected line terminator in regular expression literal.", this.lineNumber, this.Source.Path);
-                else if (c == -1)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected end of input in regular expression literal.", this.lineNumber, this.Source.Path);
-
-                // Append the character to the regular expression.
                 body.Append((char)c);
             }
 
             // Read the flags.
-            var flags = new StringBuilder(3);
+            var flags = new StringBuilder();
             while (true)
             {
                 int c = this.reader.Peek();
-                if (IsIdentifierChar(c) == false || c == -1)
+                if ((c < 'A' || c > 'Z') && (c < 'a' || c > 'z'))
                     break;
-
-                if (c == '\\')
-                {
-                    // Unicode escape sequence.
-                    ReadNextChar();
-                    if (ReadNextChar() != 'u')
-                        throw new JavaScriptException(this.engine, "SyntaxError", "Invalid escape sequence in identifier.", this.lineNumber, this.Source.Path);
-                    c = ReadHexEscapeSequence(4);
-                    if (IsIdentifierChar(c) == false)
-                        throw new JavaScriptException(this.engine, "SyntaxError", "Invalid character in identifier.", this.lineNumber, this.Source.Path);
-                    flags.Append((char)c);
-                }
-                else
-                {
-                    // Add the character we peeked at to the flags.
-                    flags.Append((char)c);
-
-                    // Advance the input stream.
-                    ReadNextChar();
-                }
+                this.reader.Read();
+                flags.Append((char)c);
             }
 
             // Create a new literal token.
@@ -892,13 +829,12 @@ namespace Jurassic.Compiler
         /// Validates the given string is a valid identifier and returns the identifier name after
         /// escape sequences have been processed.
         /// </summary>
-        /// <param name="engine"> The associated script engine. </param>
         /// <param name="str"> The string to resolve into an identifier. </param>
         /// <returns> The identifier name after escape sequences have been processed, or
         /// <c>null</c> if the string is not an identifier. </returns>
-        internal static string ResolveIdentifier(ScriptEngine engine, string str)
+        public static string ResolveIdentifier(string str)
         {
-            var lexer = new Lexer(engine, new StringScriptSource(str));
+            var lexer = new Lexer(new StringReader(str), null);
             var argumentToken = lexer.NextToken();
             if ((argumentToken is IdentifierToken) == false || lexer.NextToken() != null)
                 return null;

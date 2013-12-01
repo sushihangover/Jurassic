@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace Jurassic.Library
@@ -7,7 +8,6 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents the base class of all the javascript errors.
     /// </summary>
-    [Serializable]
     public class ErrorInstance : ObjectInstance
     {
 
@@ -31,22 +31,11 @@ namespace Jurassic.Library
                 this.FastSetProperty("name", name, PropertyAttributes.FullAccess);
             if (message != null)
                 this.FastSetProperty("message", message, PropertyAttributes.FullAccess);
-
-#if !SILVERLIGHT            
-            if (generateStack == true && ScriptEngine.LowPrivilegeEnvironment == false)
+            if (generateStack == true)
             {
-                //try
-                //{
-                    var stackTrace = string.Concat(this.ToStringJS(), Environment.NewLine, Environment.StackTrace);
-                    this.FastSetProperty("stack", stackTrace, PropertyAttributes.FullAccess);
-                //}
-                //catch (System.Security.SecurityException)
-                //{
-                //    // Note: Environment.StackTrace requires EnvironmentPermission (unrestricted).
-                //    ScriptEngine.SetLowPrivilegeEnvironment();
-                //}
+                var stackTrace = string.Concat(this.ToStringJS(), Environment.NewLine, Environment.StackTrace);
+                this.FastSetProperty("stack", stackTrace, PropertyAttributes.FullAccess);
             }
-#endif
         }
 
 
