@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Jurassic.Library
@@ -8,6 +7,7 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents an instance of the RegExp object.
     /// </summary>
+    [Serializable]
     public class RegExpInstance : ObjectInstance
     {
         private Regex value;
@@ -32,7 +32,16 @@ namespace Jurassic.Library
         {
             if (pattern == null)
                 throw new ArgumentNullException("pattern");
-            this.value = new Regex(pattern, ParseFlags(flags));
+
+            try
+            {
+                this.value = new Regex(pattern, ParseFlags(flags));
+            }
+            catch (ArgumentException ex)
+            {
+                // Wrap the exception so that it can be caught within javascript code.
+                throw new JavaScriptException(this.Engine, "SyntaxError", "Invalid regular expression - " + ex.Message);
+            }
 
             // Initialize the javascript properties.
             this.FastSetProperty("source", pattern);
@@ -172,7 +181,9 @@ namespace Jurassic.Library
         [JSFunction(Deprecated = true, Name = "compile")]
         public void Compile(string pattern, string flags = null)
         {
+#if !SILVERLIGHT
             this.value = new Regex(pattern, ParseFlags(flags) | RegexOptions.Compiled);
+#endif
 
             // Update the javascript properties.
             this.FastSetProperty("source", pattern);
@@ -235,11 +246,12 @@ namespace Jurassic.Library
             object[] array = new object[match.Groups.Count];
             for (int i = 0; i < match.Groups.Count; i++)
             {
-                array[i] = match.Groups[i].Value;
-                if (match.Groups[i].Value == string.Empty)
+                var group = match.Groups[i];
+                array[i] = group.Value;
+                if (group.Captures.Count == 0)
                     array[i] = Undefined.Value;
             }
-            var result = GlobalObject.Array.New(array);
+            var result = this.Engine.Array.New(array);
             result["index"] = match.Index;
             result["input"] = input;
             return result;
@@ -277,7 +289,7 @@ namespace Jurassic.Library
             object[] matchValues = new object[matches.Count];
             for (int i = 0; i < matches.Count; i++)
                 matchValues[i] = matches[i].Value;
-            return GlobalObject.Array.New(matchValues);
+            return this.Engine.Array.New(matchValues);
         }
 
         /// <summary>
@@ -315,8 +327,8 @@ namespace Jurassic.Library
                 }
                 parameters[match.Groups.Count] = match.Index;
                 parameters[match.Groups.Count + 1] = input;
-                return replaceFunction.CallLateBound(GlobalObject.Instance, parameters).ToString();
-            });
+                return TypeConverter.ToString(replaceFunction.CallLateBound(this.Engine.Global, parameters));
+            }, this.Global == true ? int.MaxValue : 1);
         }
 
         /// <summary>
@@ -343,12 +355,11 @@ namespace Jurassic.Library
         /// <param name="input"> The string to split. </param>
         /// <param name="limit"> The maximum number of array items to return.  Defaults to unlimited. </param>
         /// <returns> An array containing the split strings. </returns>
-        public ArrayInstance Split(string input, int limit = int.MaxValue)
+        public ArrayInstance Split(string input, uint limit = uint.MaxValue)
         {
-            // Constrain limit to a positive number.
-            limit = Math.Max(0, limit);
+            // Return an empty array if limit = 0.
             if (limit == 0)
-                return GlobalObject.Array.New(new object[0]);
+                return this.Engine.Array.New(new object[0]);
 
             // Find the first match.
             Match match = this.value.Match(input, 0);
@@ -368,6 +379,8 @@ namespace Jurassic.Library
 
                 // Add the match results to the array.
                 results.Add(input.Substring(startIndex, match.Index - startIndex));
+                if (results.Count >= limit)
+                    return this.Engine.Array.New(results.ToArray());
                 startIndex = match.Index + match.Length;
                 for (int i = 1; i < match.Groups.Count; i++)
                 {
@@ -377,14 +390,14 @@ namespace Jurassic.Library
                     else
                         results.Add(match.Groups[i].Value);
                     if (results.Count >= limit)
-                        return GlobalObject.Array.New(results.ToArray());
+                        return this.Engine.Array.New(results.ToArray());
                 }
 
                 // Find the next match.
                 match = match.NextMatch();
             }
             results.Add(input.Substring(startIndex, input.Length - startIndex));
-            return GlobalObject.Array.New(results.ToArray());
+            return this.Engine.Array.New(results.ToArray());
         }
 
         /// <summary>
@@ -414,14 +427,35 @@ namespace Jurassic.Library
         {
             var options = RegexOptions.ECMAScript;
             this.globalSearch = false;
-            if (string.IsNullOrEmpty(flags) == false)
+
+            if (flags != null)
             {
-                if (flags.Contains('g'))
-                    this.globalSearch = true;
-                if (flags.Contains('i'))
-                    options |= RegexOptions.IgnoreCase;
-                if (flags.Contains('m'))
-                    options |= RegexOptions.Multiline;
+                for (int i = 0; i < flags.Length; i++)
+                {
+                    char flag = flags[i];
+                    if (flag == 'g')
+                    {
+                        if (this.globalSearch == true)
+                            throw new JavaScriptException(this.Engine, "SyntaxError", "The 'g' flag cannot be specified twice");
+                        this.globalSearch = true;
+                    }
+                    else if (flag == 'i')
+                    {
+                        if ((options & RegexOptions.IgnoreCase) == RegexOptions.IgnoreCase)
+                            throw new JavaScriptException(this.Engine, "SyntaxError", "The 'i' flag cannot be specified twice");
+                        options |= RegexOptions.IgnoreCase;
+                    }
+                    else if (flag == 'm')
+                    {
+                        if ((options & RegexOptions.Multiline) == RegexOptions.Multiline)
+                            throw new JavaScriptException(this.Engine, "SyntaxError", "The 'm' flag cannot be specified twice");
+                        options |= RegexOptions.Multiline;
+                    }
+                    else
+                    {
+                        throw new JavaScriptException(this.Engine, "SyntaxError", string.Format("Unknown flag '{0}'", flag));
+                    }
+                }
             }
             return options;
         }

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
 namespace Jurassic
@@ -21,6 +20,18 @@ namespace Jurassic
         {
             x = x ?? Undefined.Value;
             y = y ?? Undefined.Value;
+            if (x is int)
+                x = (double)(int)x;
+            if (x is uint)
+                x = (double)(uint)x;
+            if (y is int)
+                y = (double)(int)y;
+            if (y is uint)
+                y = (double)(uint)y;
+            if (x is ConcatenatedString)
+                x = x.ToString();
+            if (y is ConcatenatedString)
+                y = y.ToString();
             if (x.GetType() == y.GetType())
             {
                 if (x is double && double.IsNaN((double)x) == true)
@@ -29,7 +40,30 @@ namespace Jurassic
             }
             if ((x == Undefined.Value && y == Null.Value) || (x == Null.Value && y == Undefined.Value))
                 return true;
-            return TypeConverter.ToNumber(x) == TypeConverter.ToNumber(y);
+
+            // 5.5 == "5.5"
+            if (TypeUtilities.IsNumeric(x) && TypeUtilities.IsString(y))
+                return TypeConverter.ToNumber(x) == TypeConverter.ToNumber(y);
+            if (TypeUtilities.IsString(x) && TypeUtilities.IsNumeric(y))
+                return TypeConverter.ToNumber(x) == TypeConverter.ToNumber(y);
+
+            // false == 0, true == 1
+            if (x is bool)
+                return Equals(TypeConverter.ToNumber(x), y);
+            if (y is bool)
+                return Equals(x, TypeConverter.ToNumber(y));
+
+            // false == new Boolean(false), 1.5 == new Number(1.5)
+            if (TypeUtilities.IsNumeric(x) && y is Jurassic.Library.ObjectInstance)
+                return Equals(x, TypeConverter.ToPrimitive(y, PrimitiveTypeHint.None));
+            if (TypeUtilities.IsString(x) && y is Jurassic.Library.ObjectInstance)
+                return Equals(x, TypeConverter.ToPrimitive(y, PrimitiveTypeHint.None));
+            if (x is Jurassic.Library.ObjectInstance && TypeUtilities.IsNumeric(y))
+                return Equals(TypeConverter.ToPrimitive(x, PrimitiveTypeHint.None), y);
+            if (x is Jurassic.Library.ObjectInstance && TypeUtilities.IsString(y))
+                return Equals(TypeConverter.ToPrimitive(x, PrimitiveTypeHint.None), y);
+
+            return false;
         }
 
         /// <summary>
@@ -44,10 +78,18 @@ namespace Jurassic
             y = y ?? Undefined.Value;
             if (x is int)
                 x = (double)(int)x;
+            if (x is uint)
+                x = (double)(uint)x;
             if (y is int)
                 y = (double)(int)y;
+            if (y is uint)
+                y = (double)(uint)y;
             if (x is double && double.IsNaN((double)x) == true)
                 return false;
+            if (x is ConcatenatedString)
+                x = x.ToString();
+            if (y is ConcatenatedString)
+                y = y.ToString();
             return object.Equals(x, y);
         }
 
@@ -56,29 +98,20 @@ namespace Jurassic
         /// </summary>
         /// <param name="x"> The first object to compare. </param>
         /// <param name="y"> The second object to compare. </param>
-        /// <param name="leftFirst"> <c>true</c> if <paramref name="x"/> is evaluated first;
-        /// <c>false</c> otherwise. </param>
         /// <returns> <c>true</c> if <paramref name="x"/> is less than <paramref name="y"/>;
         /// <c>false</c> otherwise. </returns>
-        public static bool LessThan(object x, object y, bool leftFirst)
+        public static bool LessThan(object x, object y)
         {
-            if (leftFirst == true)
-            {
-                x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
-                y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
-            }
-            else
-            {
-                y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
-                x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
-            }
+            x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
+            y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
 
-            if ((x is string || x is ConcatenatedString) && (y is string || y is ConcatenatedString))
+            if (x is ConcatenatedString)
+                x = x.ToString();
+            if (y is ConcatenatedString)
+                y = y.ToString();
+
+            if (x is string && y is string)
             {
-                if (x is ConcatenatedString)
-                    x = ((ConcatenatedString)x).ToString();
-                if (y is ConcatenatedString)
-                    y = ((ConcatenatedString)y).ToString();
                 return string.CompareOrdinal((string)x, (string)y) < 0;
             }
             else
@@ -92,34 +125,79 @@ namespace Jurassic
         /// </summary>
         /// <param name="x"> The first object to compare. </param>
         /// <param name="y"> The second object to compare. </param>
-        /// <param name="leftFirst"> <c>true</c> if <paramref name="x"/> is evaluated first;
-        /// <c>false</c> otherwise. </param>
         /// <returns> <c>true</c> if <paramref name="x"/> is less than or equal to
         /// <paramref name="y"/>; <c>false</c> otherwise. </returns>
-        public static bool LessThanOrEqual(object x, object y, bool leftFirst)
+        public static bool LessThanOrEqual(object x, object y)
         {
-            if (leftFirst == true)
-            {
-                x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
-                y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
-            }
-            else
-            {
-                y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
-                x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
-            }
+            x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
+            y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
 
-            if ((x is string || x is ConcatenatedString) && (y is string || y is ConcatenatedString))
+            if (x is ConcatenatedString)
+                x = x.ToString();
+            if (y is ConcatenatedString)
+                y = y.ToString();
+
+            if (x is string && y is string)
             {
-                if (x is ConcatenatedString)
-                    x = ((ConcatenatedString)x).ToString();
-                if (y is ConcatenatedString)
-                    y = ((ConcatenatedString)y).ToString();
                 return string.CompareOrdinal((string)x, (string)y) <= 0;
             }
             else
             {
                 return TypeConverter.ToNumber(x) <= TypeConverter.ToNumber(y);
+            }
+        }
+
+        /// <summary>
+        /// Determines the ordering of two objects.  Used by the greater than operator (&gt;).
+        /// </summary>
+        /// <param name="x"> The first object to compare. </param>
+        /// <param name="y"> The second object to compare. </param>
+        /// <returns> <c>true</c> if <paramref name="x"/> is greater than <paramref name="y"/>;
+        /// <c>false</c> otherwise. </returns>
+        public static bool GreaterThan(object x, object y)
+        {
+            x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
+            y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
+
+            if (x is ConcatenatedString)
+                x = x.ToString();
+            if (y is ConcatenatedString)
+                y = y.ToString();
+
+            if (x is string && y is string)
+            {
+                return string.CompareOrdinal((string)x, (string)y) > 0;
+            }
+            else
+            {
+                return TypeConverter.ToNumber(x) > TypeConverter.ToNumber(y);
+            }
+        }
+
+        /// <summary>
+        /// Determines the ordering of two objects.  Used by the greater than or equal operator (&gt;=).
+        /// </summary>
+        /// <param name="x"> The first object to compare. </param>
+        /// <param name="y"> The second object to compare. </param>
+        /// <returns> <c>true</c> if <paramref name="x"/> is greater than or equal to
+        /// <paramref name="y"/>; <c>false</c> otherwise. </returns>
+        public static bool GreaterThanOrEqual(object x, object y)
+        {
+            x = TypeConverter.ToPrimitive(x, PrimitiveTypeHint.Number);
+            y = TypeConverter.ToPrimitive(y, PrimitiveTypeHint.Number);
+
+            if (x is ConcatenatedString)
+                x = x.ToString();
+            if (y is ConcatenatedString)
+                y = y.ToString();
+
+            if (x is string && y is string)
+            {
+                return string.CompareOrdinal((string)x, (string)y) >= 0;
+            }
+            else
+            {
+                return TypeConverter.ToNumber(x) >= TypeConverter.ToNumber(y);
             }
         }
 
@@ -143,11 +221,19 @@ namespace Jurassic
                 y = Undefined.Value;
             if (x is int)
                 x = (double)(int)x;
+            if (x is uint)
+                x = (double)(uint)x;
             if (y is int)
                 y = (double)(int)y;
+            if (y is uint)
+                y = (double)(uint)y;
             if (x is double && (double) x == 0.0 && y is double && (double)y == 0.0)
                 if ((1 / (double)x) != (1 / (double)y))
                     return false;
+            if (x is ConcatenatedString)
+                x = x.ToString();
+            if (y is ConcatenatedString)
+                y = y.ToString();
             return object.Equals(x, y);
         }
     }

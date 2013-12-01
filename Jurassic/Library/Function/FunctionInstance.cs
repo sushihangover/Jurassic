@@ -6,8 +6,13 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents a JavaScript function.
     /// </summary>
+    [Serializable]
     public abstract class FunctionInstance : ObjectInstance
     {
+        // Used to speed up access to the prototype property.
+        private int cachedInstancePrototypeIndex;
+        private object cachedInstancePrototypeSchema;
+
 
         //     INITIALIZATION
         //_________________________________________________________________________________________
@@ -42,7 +47,24 @@ namespace Jurassic.Library
         /// </summary>
         public ObjectInstance InstancePrototype
         {
-            get { return this["prototype"] as ObjectInstance; }
+            get
+            {
+                // See 13.2.2
+                
+                // Retrieve the value of the prototype property.
+                //var prototype = this["prototype"] as ObjectInstance;
+                ObjectInstance prototype;
+                if (this.cachedInstancePrototypeSchema == this.InlineCacheKey)
+                    prototype = this.InlinePropertyValues[this.cachedInstancePrototypeIndex] as ObjectInstance;
+                else
+                    prototype = this.InlineGetPropertyValue("prototype", out this.cachedInstancePrototypeIndex, out this.cachedInstancePrototypeSchema) as ObjectInstance;
+
+                // If the prototype property is not set to an object, use the Object prototype property instead.
+                if (prototype == null && this != this.Engine.Object)
+                    return this.Engine.Object.InstancePrototype;
+
+                return prototype;
+            }
         }
 
         /// <summary>
@@ -54,11 +76,29 @@ namespace Jurassic.Library
         }
 
         /// <summary>
+        /// Gets the display name of the function.  This is equal to the displayName property, if
+        /// it exists, or the name property otherwise.
+        /// </summary>
+        public string DisplayName
+        {
+            get
+            {
+                if (this.HasProperty("displayName"))
+                    return TypeConverter.ToString(this["displayName"]);
+                var name = TypeConverter.ToString(this["name"]);
+                if (name == string.Empty)
+                    return "[Anonymous]";
+                return name;
+            }
+        }
+
+        /// <summary>
         /// Gets the number of arguments expected by the function.
         /// </summary>
         public int Length
         {
-            get { return TypeConverter.ToInteger("length"); }
+            get { return TypeConverter.ToInteger(this["length"]); }
+            protected set { this.FastSetProperty("length", value); }
         }
 
 
@@ -80,7 +120,7 @@ namespace Jurassic.Library
                 return false;
             object functionPrototype = this["prototype"];
             if ((functionPrototype is ObjectInstance) == false)
-                throw new JavaScriptException("TypeError", "Function has non-object prototype in instanceof check");
+                throw new JavaScriptException(this.Engine, "TypeError", "Function has non-object prototype in instanceof check");
             var instancePrototype = ((ObjectInstance)instance).Prototype;
             while (instancePrototype != null)
             {
@@ -110,9 +150,13 @@ namespace Jurassic.Library
             var newObject = ObjectInstance.CreateRawObject(this.InstancePrototype);
 
             // Run the function, with the new object as the "this" keyword.
-            CallLateBound(newObject, argumentValues);
+            var result = CallLateBound(newObject, argumentValues);
 
-            // Return the new object.
+            // Return the result of the function if it is an object.
+            if (result is ObjectInstance)
+                return (ObjectInstance)result;
+
+            // Otherwise, return the new object.
             return newObject;
         }
 
@@ -137,14 +181,14 @@ namespace Jurassic.Library
             else
             {
                 if ((arguments is ObjectInstance) == false)
-                    throw new JavaScriptException("TypeError", "The second parameter of apply() must be an array or an array-like object.");
+                    throw new JavaScriptException(this.Engine, "TypeError", "The second parameter of apply() must be an array or an array-like object.");
                 ObjectInstance argumentsObject = (ObjectInstance)arguments;
                 object arrayLengthObj = argumentsObject["length"];
                 if (arrayLengthObj == null || arrayLengthObj == Undefined.Value || arrayLengthObj == Null.Value)
-                    throw new JavaScriptException("TypeError", "The second parameter of apply() must be an array or an array-like object.");
+                    throw new JavaScriptException(this.Engine, "TypeError", "The second parameter of apply() must be an array or an array-like object.");
                 uint arrayLength = TypeConverter.ToUint32(arrayLengthObj);
                 if (arrayLength != TypeConverter.ToNumber(arrayLengthObj))
-                    throw new JavaScriptException("TypeError", "The second parameter of apply() must be an array or an array-like object.");
+                    throw new JavaScriptException(this.Engine, "TypeError", "The second parameter of apply() must be an array or an array-like object.");
                 argumentsArray = new object[arrayLength];
                 for (uint i = 0; i < arrayLength; i++)
                     argumentsArray[i] = argumentsObject[i];

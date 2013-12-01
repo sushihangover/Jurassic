@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 
 namespace Jurassic.Library
@@ -8,13 +7,21 @@ namespace Jurassic.Library
     /// <summary>
     /// Provides functionality common to all JavaScript objects.
     /// </summary>
+    [Serializable]
     public class ObjectInstance
+#if !SILVERLIGHT
+        : System.Runtime.Serialization.IDeserializationCallback
+#endif
     {
+        // The script engine associated with this object.
+        [NonSerialized]
+        private ScriptEngine engine;
+
         // Internal prototype chain.
         private ObjectInstance prototype;
 
         // Stores the property names and attributes for this object.
-        private HiddenClassSchema schema = HiddenClassSchema.Empty;
+        private HiddenClassSchema schema;
 
         // Stores the property values for this object.
         private object[] propertyValues = new object[4];
@@ -39,8 +46,13 @@ namespace Jurassic.Library
         /// <summary>
         /// Creates an Object with no prototype.
         /// </summary>
-        private ObjectInstance()
+        /// <param name="engine"> The script engine associated with this object. </param>
+        protected ObjectInstance(ScriptEngine engine)
         {
+            if (engine == null)
+                throw new ArgumentNullException("engine");
+            this.engine = engine;
+            this.schema = this.engine.EmptySchema;
         }
 
         /// <summary>
@@ -52,20 +64,24 @@ namespace Jurassic.Library
             if (prototype == null)
                 throw new ArgumentNullException("prototype");
             this.prototype = prototype;
+            this.engine = prototype.Engine;
+            this.schema = this.engine.EmptySchema;
         }
 
         /// <summary>
         /// Creates an Object with no prototype to serve as the base prototype of all objects.
         /// </summary>
+        /// <param name="engine"> The script engine associated with this object. </param>
         /// <returns> An Object with no prototype. </returns>
-        internal static ObjectInstance CreateRootObject()
+        internal static ObjectInstance CreateRootObject(ScriptEngine engine)
         {
-            return new ObjectInstance();
+            return new ObjectInstance(engine);
         }
 
         /// <summary>
         /// Creates an Object instance (use ObjectConstructor.Construct rather than this).
         /// </summary>
+        /// <param name="prototype"> The next object in the prototype chain. </param>
         /// <returns> An Object instance. </returns>
         internal static ObjectInstance CreateRawObject(ObjectInstance prototype)
         {
@@ -74,8 +90,47 @@ namespace Jurassic.Library
 
 
 
+        //     SERIALIZATION
+        //_________________________________________________________________________________________
+
+#if !SILVERLIGHT
+
+        /// <summary>
+        /// Runs when the entire object graph has been deserialized.
+        /// </summary>
+        /// <param name="sender"> Currently always <c>null</c>. </param>
+        /// <remarks> Derived classes must call the base class implementation. </remarks>
+        void System.Runtime.Serialization.IDeserializationCallback.OnDeserialization(object sender)
+        {
+            OnDeserializationCallback();
+        }
+
+        /// <summary>
+        /// Runs when the entire object graph has been deserialized.
+        /// </summary>
+        /// <remarks> Derived classes must call the base class implementation. </remarks>
+        protected virtual void OnDeserializationCallback()
+        {
+            // Set the engine to the per-thread deserialization script engine.
+            this.engine = ScriptEngine.DeserializationEnvironment;
+            if (this.engine == null)
+                throw new InvalidOperationException("Set the ScriptEngine.DeserializationEnvironment property before deserializing any objects.");
+        }
+
+#endif
+
+
+
         //     .NET ACCESSOR PROPERTIES
         //_________________________________________________________________________________________
+
+        /// <summary>
+        /// Gets a reference to the script engine associated with this object.
+        /// </summary>
+        public ScriptEngine Engine
+        {
+            get { return this.engine; }
+        }
 
         /// <summary>
         /// Gets the internal class name of the object.  Used by the default toString()
@@ -83,7 +138,7 @@ namespace Jurassic.Library
         /// </summary>
         protected virtual string InternalClassName
         {
-            get { return "Object"; }
+            get { return this is ObjectInstance ? "Object" : this.GetType().Name; }
         }
 
         /// <summary>
@@ -134,7 +189,29 @@ namespace Jurassic.Library
         }
 
         /// <summary>
+        /// Gets or sets the value of an array-indexed property.
+        /// </summary>
+        /// <param name="index"> The index of the property to retrieve. </param>
+        /// <returns> The property value, or <c>null</c> if the property doesn't exist. </returns>
+        public object this[int index]
+        {
+            get
+            {
+                if (index < 0)
+                    throw new ArgumentOutOfRangeException("index");
+                return GetPropertyValue((uint)index);
+            }
+            set
+            {
+                if (index < 0)
+                    throw new ArgumentOutOfRangeException("index");
+                SetPropertyValue((uint)index, value, false);
+            }
+        }
+
+        /// <summary>
         /// Gets an enumerable list of every property name and value associated with this object.
+        /// Does not include properties in the prototype chain.
         /// </summary>
         public virtual IEnumerable<PropertyNameAndValue> Properties
         {
@@ -182,19 +259,38 @@ namespace Jurassic.Library
         /// <returns> The value of the property, or <c>null</c> if the property doesn't exist. </returns>
         public object InlineGetPropertyValue(string name, out int cachedIndex, out object cacheKey)
         {
-            //cachedIndex = this.schema.GetPropertyIndex(name);
-            //if (cachedIndex < 0)
-            //{
-            //    // The property is in the prototype or is non-existant.
-            //    cacheKey = null;
-            //    if (this.Prototype == null)
-            //        return null;
-            //    return this.Prototype.Get(name);
-            //}
-            //cacheKey = this.InlineCacheKey;
-            //return this.InlinePropertyValues[cachedIndex];
+            var propertyInfo = this.schema.GetPropertyIndexAndAttributes(name);
+            if (propertyInfo.Exists == true)
+            {
+                // The property exists; it can be cached as long as it is not an accessor property.
+                if ((propertyInfo.Attributes & (PropertyAttributes.IsAccessorProperty | PropertyAttributes.IsLengthProperty)) != 0)
+                {
+                    // Getters and the length property cannot be cached.
+                    cachedIndex = -1;
+                    cacheKey = null;
 
-            throw new NotImplementedException();
+                    // Call the getter if there is one.
+                    if (propertyInfo.IsAccessor == true)
+                        return ((PropertyAccessorValue)this.propertyValues[propertyInfo.Index]).GetValue(this);
+
+                    // Otherwise, the property is the "magic" length property.
+                    return ((ArrayInstance)this).Length;
+                }
+
+                // The property can be cached.
+                cachedIndex = propertyInfo.Index;
+                cacheKey = this.InlineCacheKey;
+                return this.propertyValues[cachedIndex];
+            }
+            else
+            {
+                // The property is in the prototype or is non-existent.
+                cachedIndex = -1;
+                cacheKey = null;
+                if (this.Prototype == null)
+                    return null;
+                return this.Prototype.GetNamedPropertyValue(name);
+            }
         }
 
         /// <summary>
@@ -204,29 +300,41 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="name"> The name of the property to set. </param>
         /// <param name="value"> The desired value of the property. </param>
+        /// <param name="throwOnError"> <c>true</c> to throw an exception if the property could not
+        /// be set (i.e. if the property is read-only or if the object is not extensible and a new
+        /// property needs to be created). </param>
         /// <param name="cachedIndex"> Set to a zero-based index that can be used to get or set the
         /// property value in future (provided the cache key doesn't change). </param>
         /// <param name="cacheKey"> Set to a value that can be compared with the CacheKey property
         /// to determine if the cached index needs to be refreshed.  Can be set to <c>null</c> to
         /// prohibit caching. </param>
-        public void InlineSetPropertyValue(string name, object value, out int cachedIndex, out object cacheKey)
+        public void InlineSetPropertyValue(string name, object value, bool throwOnError, out int cachedIndex, out object cacheKey)
         {
-            //cachedIndex = this.schema.GetPropertyIndex(name);
-            //if (cachedIndex < 0)
-            //{
-            //    // The property is in the prototype or doesn't exist - add a new property.
-            //    this.schema = this.schema.AddProperty(name);
-            //    cachedIndex = this.schema.GetPropertyIndex(name);
-            //    if (cachedIndex >= this.InlinePropertyValues.Length)
-            //    {
-            //        // Resize the value array.
-            //        Array.Resize(ref this.propertyValues, this.InlinePropertyValues.Length * 2);
-            //    }
-            //}
-            //cacheKey = this.InlineCacheKey;
-            //this.InlinePropertyValues[cachedIndex] = value;
-
-            throw new NotImplementedException();
+            var propertyInfo = this.schema.GetPropertyIndexAndAttributes(name);
+            if (propertyInfo.Exists == true)
+            {
+                // The property exists; it can be cached as long as it is not read-only or an accessor property.
+                if ((propertyInfo.Attributes & (PropertyAttributes.Writable | PropertyAttributes.IsAccessorProperty | PropertyAttributes.IsLengthProperty)) != PropertyAttributes.Writable)
+                {
+                    cachedIndex = -1;
+                    cacheKey = null;
+                    SetPropertyValue(name, value, throwOnError);
+                }
+                else
+                {
+                    // The property can be cached.
+                    cachedIndex = propertyInfo.Index;
+                    cacheKey = this.InlineCacheKey;
+                    this.InlinePropertyValues[cachedIndex] = value ?? Undefined.Value;
+                }
+            }
+            else
+            {
+                // The property is in the prototype or is non-existent.
+                cachedIndex = -1;
+                cacheKey = null;
+                SetPropertyValue(name, value, throwOnError);
+            }
         }
 
         /// <summary>
@@ -240,34 +348,44 @@ namespace Jurassic.Library
         /// <param name="name"> The name of the property to set. </param>
         /// <param name="value"> The desired value of the property.  This must be a javascript
         /// primitive (double, string, etc) or a class derived from <see cref="ObjectInstance"/>. </param>
+        /// <param name="throwOnError"> <c>true</c> to throw an exception if the property could not
+        /// be set (i.e. if the property is read-only or if the object is not extensible and a new
+        /// property needs to be created). </param>
         /// <param name="cachedIndex"> Set to a zero-based index that can be used to get or set the
         /// property value in future (provided the cache key doesn't change). </param>
         /// <param name="cacheKey"> Set to a value that can be compared with the CacheKey property
         /// to determine if the cached index needs to be refreshed.  Can be set to <c>null</c> to
         /// prohibit caching. </param>
         /// <returns> <c>true</c> if the property value exists; <c>false</c> otherwise. </returns>
-        public bool InlineSetPropertyValueIfExists(string name, object value, out int index, out object cacheKey)
+        public bool InlineSetPropertyValueIfExists(string name, object value, bool throwOnError, out int cachedIndex, out object cacheKey)
         {
-            //index = this.schema.GetPropertyIndex(name);
-            //if (index < 0)
-            //{
-            //    // The property is in the prototype or is non-existant.
-            //    cacheKey = null;
-            //    if (this.Prototype == null)
-            //        return false;
-            //    if (this.Prototype.HasProperty(name) == true)
-            //    {
-            //        // TODO: fix this.
-            //        this.Prototype[name] = value;
-            //        return true;
-            //    }
-            //    return false;
-            //}
-            //cacheKey = this.InlineCacheKey;
-            //this.InlinePropertyValues[index] = value;
-            //return true;
+            var propertyInfo = this.schema.GetPropertyIndexAndAttributes(name);
+            if (propertyInfo.Exists == true)
+            {
+                // The property exists; it can be cached as long as it is not read-only or an accessor property.
+                if ((propertyInfo.Attributes & (PropertyAttributes.Writable | PropertyAttributes.IsAccessorProperty | PropertyAttributes.IsLengthProperty)) != PropertyAttributes.Writable)
+                {
+                    cachedIndex = -1;
+                    cacheKey = null;
+                    return SetPropertyValueIfExists(name, value, throwOnError);
+                }
+                else
+                {
+                    // The property can be cached.
+                    cachedIndex = propertyInfo.Index;
+                    cacheKey = this.InlineCacheKey;
+                    this.InlinePropertyValues[cachedIndex] = value ?? Undefined.Value;
+                    return true;
+                }
 
-            throw new NotImplementedException();
+            }
+            else
+            {
+                // The property is in the prototype or is non-existent.
+                cachedIndex = -1;
+                cacheKey = null;
+                return SetPropertyValueIfExists(name, value, throwOnError);
+            }
         }
 
 
@@ -366,6 +484,19 @@ namespace Jurassic.Library
             if (arrayIndex != uint.MaxValue)
                 return GetPropertyValue(arrayIndex);
 
+            // Otherwise, the property is a name.
+            return GetNamedPropertyValue(propertyName);
+        }
+
+        /// <summary>
+        /// Gets the value of the property with the given name.  The name cannot be an array index.
+        /// </summary>
+        /// <param name="propertyName"> The name of the property.  The name cannot be an array index. </param>
+        /// <returns> The value of the property, or <c>null</c> if the property doesn't exist. </returns>
+        /// <remarks> The prototype chain is searched if the property does not exist directly on
+        /// this object. </remarks>
+        private object GetNamedPropertyValue(string propertyName)
+        {
             ObjectInstance prototypeObject = this;
             do
             {
@@ -383,7 +514,7 @@ namespace Jurassic.Library
                         return ((PropertyAccessorValue)value).GetValue(this);
 
                     // Otherwise, the property is the "magic" length property.
-                    return (int)((ArrayInstance)prototypeObject).Length;
+                    return ((ArrayInstance)prototypeObject).Length;
                 }
 
                 // Traverse the prototype chain.
@@ -429,7 +560,7 @@ namespace Jurassic.Library
                     return new PropertyDescriptor(this.propertyValues[property.Index], property.Attributes);
 
                 // The property is the "magic" length property.
-                return new PropertyDescriptor((int)((ArrayInstance)this).Length, property.Attributes);
+                return new PropertyDescriptor(((ArrayInstance)this).Length, property.Attributes);
             }
 
             // The property doesn't exist.
@@ -541,7 +672,7 @@ namespace Jurassic.Library
                 {
                     // The property is read-only.
                     if (throwOnError == true)
-                        throw new JavaScriptException("TypeError", string.Format("The property '{0}' is read-only.", propertyName));
+                        throw new JavaScriptException(this.Engine, "TypeError", string.Format("The property '{0}' is read-only.", propertyName));
                     return true;
                 }
 
@@ -559,9 +690,10 @@ namespace Jurassic.Library
                 {
                     // Otherwise, the property is the "magic" length property.
                     double length = TypeConverter.ToNumber(value);
-                    if (length < 0 || length > uint.MaxValue)
-                        throw new JavaScriptException("RangeError", "Invalid array length");
-                    ((ArrayInstance)this).Length = TypeConverter.ToUint32(length);
+                    uint lengthUint32 = TypeConverter.ToUint32(length);
+                    if (length != (double)lengthUint32)
+                        throw new JavaScriptException(this.Engine, "RangeError", "Invalid array length");
+                    ((ArrayInstance)this).Length = lengthUint32;
                 }
                 return true;
             }
@@ -646,7 +778,7 @@ namespace Jurassic.Library
             if (propertyInfo.IsConfigurable == false)
             {
                 if (throwOnError == true)
-                    throw new JavaScriptException("TypeError", string.Format("The property '{0}' cannot be deleted.", propertyName));
+                    throw new JavaScriptException(this.Engine, "TypeError", string.Format("The property '{0}' cannot be deleted.", propertyName));
                 return false;
             }
 
@@ -696,7 +828,7 @@ namespace Jurassic.Library
                     (descriptor.IsAccessor == false && current.IsWritable == false && TypeComparer.SameValue(currentValue, descriptor.Value) == false))
                 {
                     if (throwOnError == true)
-                        throw new JavaScriptException("TypeError", string.Format("The property '{0}' is non-configurable.", propertyName));
+                        throw new JavaScriptException(this.Engine, "TypeError", string.Format("The property '{0}' is non-configurable.", propertyName));
                     return false;
                 }
             }
@@ -724,9 +856,13 @@ namespace Jurassic.Library
             if (this.IsExtensible == false)
             {
                 if (throwOnError == true)
-                    throw new JavaScriptException("TypeError", string.Format("The property '{0}' cannot be created as the object is not extensible.", propertyName));
+                    throw new JavaScriptException(this.Engine, "TypeError", string.Format("The property '{0}' cannot be created as the object is not extensible.", propertyName));
                 return false;
             }
+
+            // To avoid running out of memory, restrict the number of properties.
+            if (this.schema.PropertyCount == 16384)
+                throw new JavaScriptException(this.engine, "Error", "Maximum number of named properties reached.");
 
             // Do not store nulls - null represents a non-existant value.
             value = value ?? Undefined.Value;
@@ -735,7 +871,7 @@ namespace Jurassic.Library
             this.schema = this.schema.AddProperty(propertyName, attributes);
 
             // Check if the value array needs to be resized.
-            int propertyIndex = this.schema.PropertyCount - 1;
+            int propertyIndex = this.schema.NextValueIndex - 1;
             if (propertyIndex >= this.InlinePropertyValues.Length)
                 Array.Resize(ref this.propertyValues, this.InlinePropertyValues.Length * 2);
 
@@ -790,7 +926,7 @@ namespace Jurassic.Library
                 if (TryCallMemberFunction(out valueOfResult, "valueOf") == true)
                 {
                     // Return value must be primitive.
-                    if (valueOfResult is double || TypeUtilities.IsPrimitiveType(valueOfResult.GetType()) == true)
+                    if (valueOfResult is double || TypeUtilities.IsPrimitive(valueOfResult) == true)
                         return valueOfResult;
                 }
 
@@ -799,7 +935,7 @@ namespace Jurassic.Library
                 if (TryCallMemberFunction(out toStringResult, "toString") == true)
                 {
                     // Return value must be primitive.
-                    if (toStringResult is string || TypeUtilities.IsPrimitiveType(toStringResult.GetType()) == true)
+                    if (toStringResult is string || TypeUtilities.IsPrimitive(toStringResult) == true)
                         return toStringResult;
                 }
 
@@ -812,7 +948,7 @@ namespace Jurassic.Library
                 if (TryCallMemberFunction(out toStringResult, "toString") == true)
                 {
                     // Return value must be primitive.
-                    if (toStringResult is string || TypeUtilities.IsPrimitiveType(toStringResult.GetType()) == true)
+                    if (toStringResult is string || TypeUtilities.IsPrimitive(toStringResult) == true)
                         return toStringResult;
                 }
 
@@ -821,13 +957,13 @@ namespace Jurassic.Library
                 if (TryCallMemberFunction(out valueOfResult, "valueOf") == true)
                 {
                     // Return value must be primitive.
-                    if (valueOfResult is double || TypeUtilities.IsPrimitiveType(valueOfResult.GetType()) == true)
+                    if (valueOfResult is double || TypeUtilities.IsPrimitive(valueOfResult) == true)
                         return valueOfResult;
                 }
 
             }
 
-            throw new JavaScriptException("TypeError", "Attempted conversion of the object to a primitive value failed.  Check the toString() and valueOf() functions.");
+            throw new JavaScriptException(this.Engine, "TypeError", "Attempted conversion of the object to a primitive value failed.  Check the toString() and valueOf() functions.");
         }
 
         /// <summary>
@@ -841,9 +977,9 @@ namespace Jurassic.Library
         {
             var function = GetPropertyValue(functionName);
             if (function == null)
-                throw new JavaScriptException("TypeError", string.Format("Object {0} has no method '{1}'", this.ToString(), functionName));
+                throw new JavaScriptException(this.Engine, "TypeError", string.Format("Object {0} has no method '{1}'", this.ToString(), functionName));
             if ((function is FunctionInstance) == false)
-                throw new JavaScriptException("TypeError", string.Format("Property '{1}' of object {0} is not a function", this.ToString(), functionName));
+                throw new JavaScriptException(this.Engine, "TypeError", string.Format("Property '{1}' of object {0} is not a function", this.ToString(), functionName));
             return ((FunctionInstance)function).CallLateBound(this, parameters);
         }
 
@@ -910,29 +1046,31 @@ namespace Jurassic.Library
         /// <summary>
         /// Determines if a property with the given name exists on this object.
         /// </summary>
+        /// <param name="engine"> The associated script engine. </param>
         /// <param name="propertyName"> The name of the property. </param>
         /// <returns> <c>true</c> if a property with the given name exists on this object,
         /// <c>false</c> otherwise. </returns>
         /// <remarks> Objects in the prototype chain are not considered. </remarks>
-        [JSFunction(Name = "hasOwnProperty", Flags = FunctionBinderFlags.HasThisObject)]
-        public static bool HasOwnProperty(object thisObject, string propertyName)
+        [JSFunction(Name = "hasOwnProperty", Flags = JSFunctionFlags.HasEngineParameter | JSFunctionFlags.HasThisObject)]
+        public static bool HasOwnProperty(ScriptEngine engine, object thisObject, string propertyName)
         {
-            TypeUtilities.VerifyThisObject(thisObject, "hasOwnProperty");
-            return TypeConverter.ToObject(thisObject).GetOwnPropertyDescriptor(propertyName).Exists;
+            TypeUtilities.VerifyThisObject(engine, thisObject, "hasOwnProperty");
+            return TypeConverter.ToObject(engine, thisObject).GetOwnPropertyDescriptor(propertyName).Exists;
         }
 
         /// <summary>
         /// Determines if this object is in the prototype chain of the given object.
         /// </summary>
+        /// <param name="engine"> The associated script engine. </param>
         /// <param name="obj"> The object to check. </param>
         /// <returns> <c>true</c> if this object is in the prototype chain of the given object;
         /// <c>false</c> otherwise. </returns>
-        [JSFunction(Name = "isPrototypeOf", Flags = FunctionBinderFlags.HasThisObject)]
-        public static bool IsPrototypeOf(object thisObject, object obj)
+        [JSFunction(Name = "isPrototypeOf", Flags = JSFunctionFlags.HasEngineParameter | JSFunctionFlags.HasThisObject)]
+        public static bool IsPrototypeOf(ScriptEngine engine, object thisObject, object obj)
         {
             if ((obj is ObjectInstance) == false)
                 return false;
-            TypeUtilities.VerifyThisObject(thisObject, "isPrototypeOf");
+            TypeUtilities.VerifyThisObject(engine, thisObject, "isPrototypeOf");
             var obj2 = obj as ObjectInstance;
             while (true)
             {
@@ -947,15 +1085,16 @@ namespace Jurassic.Library
         /// <summary>
         /// Determines if a property with the given name exists on this object and is enumerable.
         /// </summary>
+        /// <param name="engine"> The associated script engine. </param>
         /// <param name="propertyName"> The name of the property. </param>
         /// <returns> <c>true</c> if a property with the given name exists on this object and is
         /// enumerable, <c>false</c> otherwise. </returns>
         /// <remarks> Objects in the prototype chain are not considered. </remarks>
-        [JSFunction(Name = "propertyIsEnumerable", Flags = FunctionBinderFlags.HasThisObject)]
-        public static bool PropertyIsEnumerable(object thisObject, string propertyName)
+        [JSFunction(Name = "propertyIsEnumerable", Flags = JSFunctionFlags.HasEngineParameter | JSFunctionFlags.HasThisObject)]
+        public static bool PropertyIsEnumerable(ScriptEngine engine, object thisObject, string propertyName)
         {
-            TypeUtilities.VerifyThisObject(thisObject, "propertyIsEnumerable");
-            var property = TypeConverter.ToObject(thisObject).GetOwnPropertyDescriptor(propertyName);
+            TypeUtilities.VerifyThisObject(engine, thisObject, "propertyIsEnumerable");
+            var property = TypeConverter.ToObject(engine, thisObject).GetOwnPropertyDescriptor(propertyName);
             return property.Exists && property.IsEnumerable;
         }
 
@@ -984,14 +1123,14 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="thisObject"> The value of the "this" keyword. </param>
         /// <returns> A string representing the current object. </returns>
-        [JSFunction(Name = "toString", Flags = FunctionBinderFlags.HasThisObject)]
-        public static string ToStringJS(object thisObject)
+        [JSFunction(Name = "toString", Flags = JSFunctionFlags.HasEngineParameter | JSFunctionFlags.HasThisObject)]
+        public static string ToStringJS(ScriptEngine engine, object thisObject)
         {
             if (thisObject == null || thisObject == Undefined.Value)
                 return "[object undefined]";
             if (thisObject == Null.Value)
                 return "[object null]";
-            return string.Format("[object {0}]", TypeConverter.ToObject(thisObject).InternalClassName);
+            return string.Format("[object {0}]", TypeConverter.ToObject(engine, thisObject).InternalClassName);
         }
 
 
@@ -1028,7 +1167,7 @@ namespace Jurassic.Library
                 string name;
                 if (attribute.Name != null)
                 {
-                    name = Compiler.Lexer.ResolveIdentifier(attribute.Name);
+                    name = Compiler.Lexer.ResolveIdentifier(this.Engine, attribute.Name);
                     if (name == null)
                         throw new InvalidOperationException(string.Format("The name provided to [JSFunction] on {0} is not a valid identifier.", method));
                 }
@@ -1065,7 +1204,7 @@ namespace Jurassic.Library
                 MethodGroup methodGroup = pair.Value;
 
                 // Add the function as a property of the object.
-                this.FastSetProperty(name, new ClrFunction(GlobalObject.Function.InstancePrototype, methodGroup.Methods, name, methodGroup.Length));
+                this.FastSetProperty(name, new ClrFunction(this.Engine.Function.InstancePrototype, methodGroup.Methods, name, methodGroup.Length), PropertyAttributes.NonEnumerable);
             }
         }
 

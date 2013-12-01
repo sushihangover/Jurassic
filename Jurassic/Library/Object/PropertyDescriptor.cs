@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Jurassic.Library
 {
@@ -219,17 +218,24 @@ namespace Jurassic.Library
             if (obj.HasProperty("value"))
                 value = obj["value"];
 
+            // The descriptor is an accessor if get or set is present.
+            bool isAccessor = false;
+
             // Read get accessor.
             FunctionInstance getter = defaults.Getter;
             if (obj.HasProperty("get"))
             {
                 if (obj.HasProperty("value"))
-                    throw new JavaScriptException("TypeError", "Property descriptors cannot have both 'get' and 'value' set");
+                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors cannot have both 'get' and 'value' set");
                 if (obj.HasProperty("writable"))
-                    throw new JavaScriptException("TypeError", "Property descriptors with 'get' or 'set' defined must not have 'writable' set");
-                if ((obj["get"] is FunctionInstance) == false)
-                    throw new JavaScriptException("TypeError", "Property descriptor 'get' must be a function");
-                getter = (FunctionInstance)obj["get"];
+                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors with 'get' or 'set' defined must not have 'writable' set");
+                if (obj["get"] is FunctionInstance)
+                    getter = (FunctionInstance)obj["get"];
+                else if (TypeUtilities.IsUndefined(obj["get"]) == true)
+                    getter = null;
+                else
+                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptor 'get' must be a function");
+                isAccessor = true;
             }
 
             // Read set accessor.
@@ -237,12 +243,16 @@ namespace Jurassic.Library
             if (obj.HasProperty("set"))
             {
                 if (obj.HasProperty("value"))
-                    throw new JavaScriptException("TypeError", "Property descriptors cannot have both 'set' and 'value' set");
+                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors cannot have both 'set' and 'value' set");
                 if (obj.HasProperty("writable"))
-                    throw new JavaScriptException("TypeError", "Property descriptors with 'get' or 'set' defined must not have 'writable' set");
-                if ((obj["set"] is FunctionInstance) == false)
-                    throw new JavaScriptException("TypeError", "Property descriptor 'set' must be a function");
-                setter = (FunctionInstance)obj["set"];
+                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors with 'get' or 'set' defined must not have 'writable' set");
+                if (obj["set"] is FunctionInstance)
+                    setter = (FunctionInstance)obj["set"];
+                else if (TypeUtilities.IsUndefined(obj["set"]) == true)
+                    setter = null;
+                else
+                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptor 'set' must be a function");
+                isAccessor = true;
             }
 
             // Build up the attributes enum.
@@ -256,7 +266,7 @@ namespace Jurassic.Library
 
             // Either a value or an accessor is possible.
             object descriptorValue = value;
-            if (getter != null || setter != null)
+            if (isAccessor == true)
                 descriptorValue = new PropertyAccessorValue(getter, setter);
 
             // Create the new property descriptor.
@@ -267,11 +277,14 @@ namespace Jurassic.Library
         /// Populates an object with the following properties: configurable, writable, enumerable,
         /// value, get, set.
         /// </summary>
+        /// <param name="engine"> The script engine used to create a new object. </param>
         /// <returns> An object with the information in this property descriptor set as individual
         /// properties. </returns>
-        public ObjectInstance ToObject()
+        public ObjectInstance ToObject(ScriptEngine engine)
         {
-            var result = GlobalObject.Object.Construct();
+            if (engine == null)
+                throw new ArgumentNullException("engine");
+            var result = engine.Object.Construct();
             if (this.IsAccessor == false)
             {
                 result["value"] = this.Value;

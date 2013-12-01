@@ -16,6 +16,22 @@ namespace Jurassic.Compiler
             get;
         }
 
+        /// <summary>
+        /// Converts the token to the string suitable for embedding in an error message.
+        /// </summary>
+        /// <param name="token"> The token to convert.  Can be <c>null</c>. </param>
+        /// <returns> A string suitable for embedding in an error message. </returns>
+        public static string ToText(Token token)
+        {
+            if (token == null)
+                return "end of input";
+            return string.Format("'{0}'", token.Text);
+        }
+
+        /// <summary>
+        /// Converts the token to a string representation.
+        /// </summary>
+        /// <returns> A textual representation of the object. </returns>
         public override string ToString()
         {
             return string.Format("{0} [{1}]", this.Text, this.GetType().Name);
@@ -27,9 +43,14 @@ namespace Jurassic.Compiler
     /// </summary>
     internal class WhiteSpaceToken : Token
     {
-        public WhiteSpaceToken(int count)
+        /// <summary>
+        /// Creates a new WhiteSpaceToken instance.
+        /// </summary>
+        /// <param name="lineTerminatorCount"> The number of line terminators encountered while
+        /// reading the whitespace. </param>
+        public WhiteSpaceToken(int lineTerminatorCount)
         {
-            this.LineTerminatorCount = count;
+            this.LineTerminatorCount = lineTerminatorCount;
         }
 
         /// <summary>
@@ -41,6 +62,9 @@ namespace Jurassic.Compiler
             private set;
         }
 
+        /// <summary>
+        /// Gets a string that represents the token in a parseable form.
+        /// </summary>
         public override string Text
         {
             get { return Environment.NewLine; }

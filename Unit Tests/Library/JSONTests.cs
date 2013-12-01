@@ -71,6 +71,7 @@ namespace UnitTests
             Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("JSON.parse('5e-')"));
             Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("JSON.parse('+5')"));
             Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("JSON.parse('5e05')"));
+            Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType("JSON.parse('12\\t\\r\\n 34')"));
         }
 
         [TestMethod]
@@ -96,6 +97,7 @@ namespace UnitTests
             Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType(@"JSON.parse('""te \\uF""')"));
             Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType(@"JSON.parse('""te \\uFF""')"));
             Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType(@"JSON.parse('""te \\uFFF""')"));
+            Assert.AreEqual("SyntaxError", TestUtils.EvaluateExceptionType(@"JSON.parse(""\\u0022abc\\u0022"")"));
         }
 
         [TestMethod]

@@ -10,21 +10,43 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents a single method that the function binder can call.
     /// </summary>
+    [Serializable]
     public class FunctionBinderMethod
+#if !SILVERLIGHT
+        : System.Runtime.Serialization.ISerializable
+#endif
     {
+
+        //     INITIALIZATION
+        //_________________________________________________________________________________________
+
         /// <summary>
         /// Creates a new FunctionBinderMethod instance.
         /// </summary>
         /// <param name="method"> The method to call. </param>
         /// <param name="flags"> Flags that modify the binding process. </param>
-        public FunctionBinderMethod(MethodInfo method, FunctionBinderFlags flags = FunctionBinderFlags.None)
+        public FunctionBinderMethod(MethodInfo method, JSFunctionFlags flags = JSFunctionFlags.None)
+        {
+            Init(method, flags);
+        }
+
+        /// <summary>
+        /// Creates a new FunctionBinderMethod instance.
+        /// </summary>
+        /// <param name="method"> The method to call. </param>
+        /// <param name="flags"> Flags that modify the binding process. </param>
+        private void Init(MethodInfo method, JSFunctionFlags flags)
         {
             if (method == null)
                 throw new ArgumentNullException("method");
             this.Method = method;
             this.Flags = flags;
-            this.Preferred = (flags & FunctionBinderFlags.Preferred) != 0;
-            this.HasExplicitThisParameter = method.IsStatic == true ? (flags & FunctionBinderFlags.HasThisObject) != 0 : false;
+            this.HasEngineParameter = (flags & JSFunctionFlags.HasEngineParameter) != 0;
+            if (this.HasEngineParameter == true && method.IsStatic == false)
+                throw new InvalidOperationException(string.Format("The {0} flag cannot be used on the instance method '{1}'.", JSFunctionFlags.HasEngineParameter, method.Name));
+            this.HasExplicitThisParameter = (flags & JSFunctionFlags.HasThisObject) != 0;
+            if (this.HasExplicitThisParameter == true && method.IsStatic == false)
+                throw new InvalidOperationException(string.Format("The {0} flag cannot be used on the instance method '{1}'.", JSFunctionFlags.HasThisObject, method.Name));
 
             var parameters = method.GetParameters();
 
@@ -32,19 +54,26 @@ namespace Jurassic.Library
             this.DelegateParameterCount = this.HasThisParameter ? parameters.Length + 1 : parameters.Length;
             if (this.DelegateParameterCount > FunctionBinder.MaximumSupportedParameterCount)
                 throw new NotImplementedException(string.Format("Methods with more than {0} parameters are not supported.", FunctionBinder.MaximumSupportedParameterCount));
-            
+
+            // If HasEngineParameter is specified, the first parameter must be of type ScriptEngine.
+            if (this.HasEngineParameter == true)
+            {
+                if (parameters.Length == 0)
+                    throw new InvalidOperationException(string.Format("The method '{0}' does not have enough parameters.", method.Name));
+                if (parameters[0].ParameterType != typeof(ScriptEngine))
+                    throw new InvalidOperationException(string.Format("The first parameter of the method '{0}' must be of type ScriptEngine.", method.Name));
+            }
+
             // If there is a "this" parameter, it must be of type ObjectInstance (or derived from it).
             if (this.HasExplicitThisParameter == true)
             {
-                if (parameters.Length == 0)
-                    throw new InvalidOperationException("Static methods with hasThisParameter=true must have at least one parameter.");
-                this.ThisType = parameters[0].ParameterType;
+                if (parameters.Length <= (this.HasEngineParameter ? 1 : 0))
+                    throw new InvalidOperationException(string.Format("The method '{0}' does not have enough parameters.", method.Name));
+                this.ThisType = parameters[this.HasEngineParameter ? 1 : 0].ParameterType;
             }
             else if (method.IsStatic == false)
             {
                 this.ThisType = method.DeclaringType;
-                if (typeof(ObjectInstance).IsAssignableFrom(this.ThisType) == false)
-                    throw new InvalidOperationException(string.Format("Instance methods must be declared in a type deriving from {0}.", typeof(ObjectInstance).Name));
             }
 
             // Calculate the min and max parameter count.
@@ -69,9 +98,16 @@ namespace Jurassic.Library
                 this.MaxParameterCount -= 1;
             }
 
+            // Methods with a "engine" parameter effectively have one less parameter.
+            if (this.HasEngineParameter == true)
+            {
+                this.MinParameterCount -= 1;
+                this.MaxParameterCount -= 1;
+            }
+
             // Check the parameter types (the this parameter has already been checked).
             // Only certain types are supported.
-            for (int i = this.HasExplicitThisParameter ? 1 : 0; i < parameters.Length; i++)
+            for (int i = (this.HasExplicitThisParameter ? 1 : 0) + (this.HasEngineParameter ? 1 : 0); i < parameters.Length; i++)
             {
                 Type type = parameters[i].ParameterType;
 
@@ -93,6 +129,85 @@ namespace Jurassic.Library
             }
         }
 
+
+
+        //     SERIALIZATION
+        //_________________________________________________________________________________________
+
+#if !SILVERLIGHT
+
+        /// <summary>
+        /// Initializes a new instance of the FunctionBinderMethod class with serialized data.
+        /// </summary>
+        /// <param name="info"> The SerializationInfo that holds the serialized object data about
+        /// the exception being thrown. </param>
+        /// <param name="context"> The StreamingContext that contains contextual information about
+        /// the source or destination. </param>
+        protected FunctionBinderMethod(System.Runtime.Serialization.SerializationInfo info, System.Runtime.Serialization.StreamingContext context)
+        {
+            // Get the type which declared the method.
+            var typeName = info.GetString("methodType");
+            var type = Type.GetType(typeName, true, false);
+
+            // Get the method name.
+            var methodName = info.GetString("methodName");
+
+            // Get the method attributes and convert it into binding flags.
+            var attributes = (MethodAttributes)info.GetInt32("methodAttributes");
+            BindingFlags bindingFlags = 0;
+            if ((attributes & MethodAttributes.Public) != 0)
+                bindingFlags |= BindingFlags.Public;
+            else
+                bindingFlags |= BindingFlags.NonPublic;
+            if ((attributes & MethodAttributes.Static) != 0)
+                bindingFlags |= BindingFlags.Static;
+            else
+                bindingFlags |= BindingFlags.Instance;
+
+            // Get the argument types.
+            var argumentTypeNames = (string[])info.GetValue("methodArgumentTypes", typeof(string[]));
+            var argumentTypes = new Type[argumentTypeNames.Length];
+            for (int i = 0; i < argumentTypeNames.Length; i ++)
+                argumentTypes[i] = Type.GetType(argumentTypeNames[i], true, false); 
+
+            // Resolve the above information into a method.
+            var method = type.GetMethod(methodName, bindingFlags, null, argumentTypes, null);
+
+            // Restore the flags.
+            var flags = (JSFunctionFlags)info.GetInt32("flags");
+
+            // Initialize the object.
+            Init(method, flags);
+        }
+
+        /// <summary>
+        /// Sets the SerializationInfo with information about the exception.
+        /// </summary>
+        /// <param name="info"> The SerializationInfo that holds the serialized object data about
+        /// the exception being thrown. </param>
+        /// <param name="context"> The StreamingContext that contains contextual information about
+        /// the source or destination. </param>
+        public void GetObjectData(System.Runtime.Serialization.SerializationInfo info, System.Runtime.Serialization.StreamingContext context)
+        {
+            // Save the object state.
+            info.AddValue("methodType", this.Method.DeclaringType.AssemblyQualifiedName);
+            info.AddValue("methodName", this.Method.Name);
+            info.AddValue("methodAttributes", this.Method.Attributes);
+            var parameters = this.Method.GetParameters();
+            var argumentTypeNames = new string[parameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+                argumentTypeNames[i] = parameters[i].ParameterType.AssemblyQualifiedName;
+            info.AddValue("methodArgumentTypes", argumentTypeNames);
+            info.AddValue("flags", this.Flags);
+        }
+
+#endif
+
+
+
+        //     PROPERTIES
+        //_________________________________________________________________________________________
+
         /// <summary>
         /// Gets a reference to a method.
         /// </summary>
@@ -105,7 +220,7 @@ namespace Jurassic.Library
         /// <summary>
         /// Gets the flags that were passed to the constructor.
         /// </summary>
-        public FunctionBinderFlags Flags
+        public JSFunctionFlags Flags
         {
             get;
             private set;
@@ -120,10 +235,10 @@ namespace Jurassic.Library
         }
 
         /// <summary>
-        /// Gets a value that indicates that this method is preferred when there are multiple
-        /// methods to choose from.
+        /// Gets a value that indicates whether the script engine should be passed as the first
+        /// parameter.  Always false for instance methods.
         /// </summary>
-        public bool Preferred
+        public bool HasEngineParameter
         {
             get;
             private set;
@@ -131,7 +246,8 @@ namespace Jurassic.Library
 
         /// <summary>
         /// Gets a value that indicates whether the "this" object should be passed as the first
-        /// parameter.  Always false for instance methods.
+        /// parameter (or the second parameter if HasEngineParameter is <c>true</c>).  Always false
+        /// for instance methods.
         /// </summary>
         public bool HasExplicitThisParameter
         {
@@ -169,12 +285,12 @@ namespace Jurassic.Library
         }
 
         /// <summary>
-        /// Gets the number of parameters that the method requires (excluding the implicit
-        /// this parameter and the ParamArray parameter, if these are present).
+        /// Gets the number of parameters that the method requires (excluding the script engine
+        /// parameter, explicit this parameter and the ParamArray parameter, if these are present).
         /// </summary>
         public int ParameterCount
         {
-            get { return this.Method.GetParameters().Length - (this.HasExplicitThisParameter ? 1 : 0); }
+            get { return this.Method.GetParameters().Length - (this.HasExplicitThisParameter ? 1 : 0) - (this.HasEngineParameter ? 1 : 0); }
         }
 
         /// <summary>

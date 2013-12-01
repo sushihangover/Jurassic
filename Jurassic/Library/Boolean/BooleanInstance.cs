@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents an instance of the JavaScript Boolean object.
     /// </summary>
+    [Serializable]
     public class BooleanInstance : ObjectInstance
     {
         private bool value;

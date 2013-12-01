@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using Jurassic.Compiler;
 
 namespace Jurassic.Library
@@ -8,6 +7,7 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents an arguments object.
     /// </summary>
+    [Serializable]
     public class ArgumentsInstance : ObjectInstance
     {
         private UserDefinedFunction callee;
@@ -26,7 +26,7 @@ namespace Jurassic.Library
         /// <param name="callee"> The function that was called. </param>
         /// <param name="scope"> The function scope. </param>
         /// <param name="argumentValues"> The argument values that were passed to the function. </param>
-        internal ArgumentsInstance(ObjectInstance prototype, UserDefinedFunction callee, DeclarativeScope scope, object[] argumentValues)
+        public ArgumentsInstance(ObjectInstance prototype, UserDefinedFunction callee, DeclarativeScope scope, object[] argumentValues)
             : base(prototype)
         {
             if (callee == null)
@@ -38,34 +38,59 @@ namespace Jurassic.Library
             this.callee = callee;
             this.scope = scope;
             this.FastSetProperty("length", argumentValues.Length, PropertyAttributes.NonEnumerable);
-            this.FastSetProperty("callee", callee, PropertyAttributes.NonEnumerable);
 
-            // Create an array mappedArguments where mappedArguments[i] = true means a mapping is
-            // maintained between arguments[i] and the corresponding variable.
-            this.mappedArguments = new bool[argumentValues.Length];
-            var mappedNames = new HashSet<string>();
-            for (int i = argumentValues.Length - 1; i >= 0; i--)
+            if (this.callee.StrictMode == false)
             {
-                this[(uint)i] = argumentValues[i];    // Note: this.mappedArguments[i] is currently false.
-                if (i < callee.ArgumentNames.Count)
+                this.FastSetProperty("callee", callee, PropertyAttributes.NonEnumerable);
+
+
+                // Create an array mappedArguments where mappedArguments[i] = true means a mapping is
+                // maintained between arguments[i] and the corresponding variable.
+                this.mappedArguments = new bool[argumentValues.Length];
+                var mappedNames = new Dictionary<string, int>();    // maps argument name -> index
+                for (int i = 0; i < argumentValues.Length; i++)
                 {
-                    // The argument name is mapped if it hasn't been seen before.
-                    this.mappedArguments[i] = mappedNames.Add(callee.ArgumentNames[i]);
-                    if (this.mappedArguments[i] == true)
+                    if (i < callee.ArgumentNames.Count)
                     {
-                        var getter = new UserDefinedFunction(GlobalObject.Function.InstancePrototype, "ArgumentGetter", new string[0], this.scope, ArgumentGetter);
+                        // Check if the argument name appeared previously in the argument list.
+                        int previousIndex;
+                        if (mappedNames.TryGetValue(callee.ArgumentNames[i], out previousIndex) == true)
+                        {
+                            // The argument name has appeared before.  Remove the getter/setter.
+                            this.DefineProperty(previousIndex.ToString(), new PropertyDescriptor(argumentValues[previousIndex], PropertyAttributes.FullAccess), false);
+
+                            // The argument is no longer mapped.
+                            this.mappedArguments[previousIndex] = false;
+                        }
+
+                        // Add the argument name and index to the hashtable.
+                        mappedNames[callee.ArgumentNames[i]] = i;
+
+                        // The argument is mapped by default.
+                        this.mappedArguments[i] = true;
+
+                        // Define a getter and setter so that the property value reflects that of the argument.
+                        var getter = new UserDefinedFunction(this.Engine.Function.InstancePrototype, "ArgumentGetter", new string[0], this.scope, "return " + callee.ArgumentNames[i], ArgumentGetter, true);
                         getter.SetPropertyValue("argumentIndex", i, false);
-                        var setter = new UserDefinedFunction(GlobalObject.Function.InstancePrototype, "ArgumentSetter", new string[0], this.scope, ArgumentSetter);
+                        var setter = new UserDefinedFunction(this.Engine.Function.InstancePrototype, "ArgumentSetter", new string[] { "value" }, this.scope, callee.ArgumentNames[i] + " = value", ArgumentSetter, true);
                         setter.SetPropertyValue("argumentIndex", i, false);
                         this.DefineProperty(i.ToString(), new PropertyDescriptor(getter, setter, PropertyAttributes.FullAccess), false);
                     }
+                    else
+                    {
+                        // This argument is unnamed - no mapping needs to happen.
+                        this[(uint)i] = argumentValues[i];
+                    }
                 }
             }
-
-            // In strict mode, accessing caller or callee is illegal.
-            if (this.callee.StrictMode == true)
+            else
             {
-                var throwErrorFunction = new ThrowTypeErrorFunction(GlobalObject.Function.InstancePrototype);
+                // In strict mode, arguments items are not connected to the variables.
+                for (int i = 0; i < argumentValues.Length; i++)
+                    this[(uint)i] = argumentValues[i];
+
+                // In strict mode, accessing caller or callee is illegal.
+                var throwErrorFunction = new ThrowTypeErrorFunction(this.Engine.Function.InstancePrototype);
                 this.DefineProperty("caller", new PropertyDescriptor(throwErrorFunction, throwErrorFunction, PropertyAttributes.Sealed), false);
                 this.DefineProperty("callee", new PropertyDescriptor(throwErrorFunction, throwErrorFunction, PropertyAttributes.Sealed), false);
             }
@@ -88,13 +113,14 @@ namespace Jurassic.Library
         /// <summary>
         /// Used to retrieve the value of an argument.
         /// </summary>
+        /// <param name="scriptEngine"> The associated script engine. </param>
         /// <param name="scope"> The scope (global or eval context) or the parent scope (function
         /// context). </param>
         /// <param name="thisObject"> The value of the <c>this</c> keyword. </param>
         /// <param name="functionObject"> The function object. </param>
-        /// <param name="arguments"> The arguments that were passed to the function. </param>
+        /// <param name="argumentValues"> The arguments that were passed to the function. </param>
         /// <returns> The result of calling the method. </returns>
-        private object ArgumentGetter(Compiler.Scope scope, object thisObject, Library.FunctionInstance functionObject, object[] argumentValues)
+        private object ArgumentGetter(ScriptEngine engine, Compiler.Scope scope, object thisObject, Library.FunctionInstance functionObject, object[] argumentValues)
         {
             int argumentIndex = TypeConverter.ToInteger(functionObject.GetPropertyValue("argumentIndex"));
             return this.scope.GetValue(this.callee.ArgumentNames[argumentIndex]);
@@ -103,13 +129,14 @@ namespace Jurassic.Library
         /// <summary>
         /// Used to set the value of an argument.
         /// </summary>
+        /// <param name="scriptEngine"> The associated script engine. </param>
         /// <param name="scope"> The scope (global or eval context) or the parent scope (function
         /// context). </param>
         /// <param name="thisObject"> The value of the <c>this</c> keyword. </param>
         /// <param name="functionObject"> The function object. </param>
-        /// <param name="arguments"> The arguments that were passed to the function. </param>
+        /// <param name="argumentValues"> The arguments that were passed to the function. </param>
         /// <returns> The result of calling the method. </returns>
-        private object ArgumentSetter(Compiler.Scope scope, object thisObject, Library.FunctionInstance functionObject, object[] argumentValues)
+        private object ArgumentSetter(ScriptEngine engine, Compiler.Scope scope, object thisObject, Library.FunctionInstance functionObject, object[] argumentValues)
         {
             int argumentIndex = TypeConverter.ToInteger(functionObject.GetPropertyValue("argumentIndex"));
             if (argumentValues != null && argumentValues.Length >= 1)

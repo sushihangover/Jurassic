@@ -17,9 +17,18 @@ namespace UnitTests
         [ThreadStatic]
         private static ActiveScriptEngine jscriptEngine;
 
+        [ThreadStatic]
+        private static Jurassic.ScriptEngine jurassicScriptEngine;
+
         public static JSEngine Engine
         {
             get { return JSEngine.Jurassic; }
+        }
+
+        public static Jurassic.CompatibilityMode CompatibilityMode
+        {
+            get { InitializeJurassic(); return jurassicScriptEngine.CompatibilityMode; }
+            set { InitializeJurassic(); jurassicScriptEngine.CompatibilityMode = value; }
         }
 
         public static object Evaluate(string script)
@@ -37,15 +46,32 @@ namespace UnitTests
             }
             else
             {
-                result = Jurassic.Library.GlobalObject.Eval(script);
-            }
-            if (result is double)
-            {
-                var numericResult = (double)result;
-                if ((double)((int)numericResult) == numericResult)
-                    return (int)numericResult;
+                InitializeJurassic();
+                result = jurassicScriptEngine.Evaluate(script);
             }
             return result;
+        }
+
+        public static void Execute(string script)
+        {
+            if (Engine == JSEngine.JScript)
+                throw new NotImplementedException();
+            else
+            {
+                InitializeJurassic();
+                jurassicScriptEngine.Execute(script);
+            }
+        }
+
+        private static void InitializeJurassic()
+        {
+            if (jurassicScriptEngine == null)
+            {
+                jurassicScriptEngine = new Jurassic.ScriptEngine();
+#if DEBUG
+                jurassicScriptEngine.EnableDebugging = true;
+#endif
+            }
         }
 
         public static object EvaluateExceptionType(string script)
@@ -66,15 +92,16 @@ namespace UnitTests
             }
             else
             {
+                object result;
                 try
                 {
-                    Evaluate(script);
+                    result = Evaluate(script);
                 }
                 catch (Jurassic.JavaScriptException ex)
                 {
                     return ex.Name;
                 }
-                return "No error was thrown";
+                return string.Format("No error was thrown (result was '{0}')", result);
             }
         }
 

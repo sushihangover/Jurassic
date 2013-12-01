@@ -54,7 +54,7 @@ namespace Performance
         }
 
         [TestMethod]
-        public void Add()
+        public void AddNumber()
         {
             TestUtils.Benchmark(@"
                 function f() {
@@ -64,6 +64,45 @@ namespace Performance
                 }
                 f();
                 ", 121.0);
+        }
+
+        [TestMethod]
+        public void AddString1()
+        {
+            TestUtils.Benchmark(@"
+                function f() {
+                    var x = '';
+                    for (var i = 0; i < 100000; i++)
+                        x = x + i
+                }
+                f();
+                ", 42.4);
+        }
+
+        [TestMethod]
+        public void AddString2()
+        {
+            TestUtils.Benchmark(@"
+                function f() {
+                    var x = '';
+                    for (var i = 0; i < 100000; i++)
+                        x += i
+                }
+                f();
+                ", 42.4);
+        }
+
+        [TestMethod]
+        public void AddString3()
+        {
+            TestUtils.Benchmark(@"
+                function f() {
+                    var x = '';
+                    for (var i = 0; i < 100000; i++)
+                        x = x + '<' + i + '>'
+                }
+                f();
+                ", 34.4);
         }
 
         [TestMethod]
@@ -288,14 +327,23 @@ namespace Performance
         }
 
         [TestMethod]
-        public void FunctionCall()
+        public void FunctionCall1()
         {
             TestUtils.Benchmark(@"
                 function f(a, b, c) {
                 }
                 for (var i = 0; i < 10000; i++)
                     f(1, 2, 3)
-                ", 80.9);
+                ", 155);
+        }
+
+        [TestMethod]
+        public void FunctionCall2()
+        {
+            TestUtils.Benchmark(@"
+                for (var i = 0; i < 10000; i++)
+                    Math.abs(52)
+                ", 190);
         }
 
         [TestMethod]
@@ -328,11 +376,11 @@ namespace Performance
                     }
                 }
                 f()
-                ", 106.2);
+                ", 74.9);
         }
 
         [TestMethod]
-        public void GlobalVariableAccess()
+        public void GlobalVariableAccess1()
         {
             TestUtils.Benchmark(@"
                 var a = 0, b = 1, c = 2, d = 3, e = 4, f = 5, g = 6;
@@ -346,7 +394,50 @@ namespace Performance
                     f = g;
                     g = a;
                 }
-                ", 8.5);
+                ", 38.1);
+        }
+
+        [TestMethod]
+        public void GlobalVariableAccess2()
+        {
+            TestUtils.Benchmark(@"
+                var a = 0, b = 1, c = 2, d = 3, e = 4, f = 5, g = 6;
+                function test()
+                {
+                    for (var i = 0; i < 100000; i ++)
+                    {
+                        a = b;
+                        b = c;
+                        c = d;
+                        d = e;
+                        e = f;
+                        f = g;
+                        g = a;
+                    }
+                }
+                test();
+                ", 45.7);
+        }
+
+        [TestMethod]
+        public void PropertyAccess()
+        {
+            TestUtils.Benchmark(@"
+                function f() {
+                    var x = { a: 0, b: 1, c: 2, d: 3, e: 4, f: 5, g: 6 };
+                    for (var i = 0; i < 100000; i ++)
+                    {
+                        x.a = x.b;
+                        x.b = x.c;
+                        x.c = x.d;
+                        x.d = x.e;
+                        x.e = x.f;
+                        x.f = x.g;
+                        x.g = x.a;
+                    }
+                }
+                f()
+                ", 32.2);
         }
 
         [TestMethod]

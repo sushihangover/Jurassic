@@ -42,6 +42,7 @@
     <Reference Include="System.Core">
       <RequiredTargetFramework>3.5</RequiredTargetFramework>
     </Reference>
+    <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
     <CodeAnalysisDependentAssemblyPaths Condition=" '$(VS100COMNTOOLS)' != '' " Include="$(VS100COMNTOOLS)..\IDE\PrivateAssemblies">
@@ -49,9 +50,16 @@
     </CodeAnalysisDependentAssemblyPaths>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Compiler\OptimizationTests.cs" />
+    <Compile Include="Core\BigIntegerTests.cs" />
+    <Compile Include="Core\SerializationTests.cs" />
+    <Compile Include="Core\ScriptEngineTests.cs" />
+    <Compile Include="Core\DocumentationSamples.cs" />
     <Compile Include="Core\TypeComparerTests.cs" />
+    <Compile Include="Library\ArgumentsTests.cs" />
     <Compile Include="Library\ArrayTests.cs" />
     <Compile Include="Core\FunctionBinderTests.cs" />
+    <Compile Include="Library\BooleanTests.cs" />
     <Compile Include="Library\JSONTests.cs" />
     <Compile Include="Library\FunctionTests.cs" />
     <Compile Include="Core\TypeConverterTests.cs" />
@@ -62,8 +70,10 @@
     <Compile Include="Library\DateTests.cs" />
     <Compile Include="Library\ErrorTests.cs" />
     <Compile Include="Library\NumberTests.cs" />
-    <Compile Include="Parser\ParserTests.cs" />
-    <Compile Include="Parser\LexerTests.cs" />
+    <Compile Include="Compiler\StatementTests.cs" />
+    <Compile Include="Compiler\ExpressionTests.cs" />
+    <Compile Include="Compiler\ParserTests.cs" />
+    <Compile Include="Compiler\LexerTests.cs" />
     <Compile Include="Utils\DynamicCodeDebugger.cs" />
     <Compile Include="Utils\TestUtils.cs" />
     <Compile Include="Utils\Interop.cs" />
@@ -76,6 +86,11 @@
       <Project>{2CE5502D-8710-4BE3-9D90-201D526904B3}</Project>
       <Name>Jurassic</Name>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <Content Include="Core\Sample Files\execute1.js" />
+    <Content Include="Core\Sample Files\globals1.js" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Jurassic.Library
 {
@@ -8,6 +7,7 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents a the value of an accessor property.
     /// </summary>
+    [Serializable]
     internal sealed class PropertyAccessorValue
     {
         private FunctionInstance getter;
