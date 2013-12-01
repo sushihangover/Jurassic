@@ -14,14 +14,10 @@
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <ProjectTypeGuids>{3AC096D0-A1C2-E12C-1390-A8335801FDAB};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
-    <SccProjectName>
-    </SccProjectName>
-    <SccLocalPath>
-    </SccLocalPath>
-    <SccAuxPath>
-    </SccAuxPath>
-    <SccProvider>
-    </SccProvider>
+    <SccProjectName>SAK</SccProjectName>
+    <SccLocalPath>SAK</SccLocalPath>
+    <SccAuxPath>SAK</SccAuxPath>
+    <SccProvider>SAK</SccProvider>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -41,10 +37,6 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Jint, Version=0.8.8.0, Culture=neutral, PublicKeyToken=973cde3f1cafed03, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>bin\Jint.dll</HintPath>
-    </Reference>
     <Reference Include="Microsoft.VisualStudio.QualityTools.UnitTestFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
     <Reference Include="System" />
     <Reference Include="System.Core">
@@ -58,12 +50,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ArrayBenchmarks.cs" />
-    <Compile Include="ConversionBenchmarks.cs" />
-    <Compile Include="CodeGenTests.cs" />
-    <Compile Include="ParserBenchmarks.cs" />
-    <Compile Include="ScriptEngineManager.cs" />
-    <Compile Include="v8.cs" />
-    <Compile Include="OperatorBenchmarks.cs" />
+    <Compile Include="LexerBenchmarks.cs" />
     <Compile Include="JSONBenchmarks.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SunSpider.cs" />
@@ -71,10 +58,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Arrays.htm" />
-    <Content Include="bin\Jint.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Files\coffee-script.js" />
     <Content Include="Files\sunspider-0.9.1\3d-cube.js" />
     <Content Include="Files\sunspider-0.9.1\3d-morph.js" />
     <Content Include="Files\sunspider-0.9.1\3d-raytrace.js" />
@@ -110,15 +93,17 @@
     <Content Include="Files\ubench\loop-empty-resolve.js" />
     <Content Include="Files\ubench\loop-empty.js" />
     <Content Include="Files\ubench\loop-sum.js" />
-    <Content Include="Files\v8\crypto.js" />
-    <Content Include="Files\v8\deltablue.js" />
-    <Content Include="Files\v8\earley-boyer.js" />
-    <Content Include="Files\v8\raytrace.js" />
-    <Content Include="Files\v8\README.txt" />
-    <Content Include="Files\v8\regexp.js" />
-    <Content Include="Files\v8\richards.js" />
-    <Content Include="Files\v8\splay.js" />
+    <Content Include="Files\v8-v4\v8-crypto.js" />
+    <Content Include="Files\v8-v4\v8-deltablue.js" />
+    <Content Include="Files\v8-v4\v8-earley-boyer.js" />
+    <Content Include="Files\v8-v4\v8-raytrace.js" />
+    <Content Include="Files\v8-v4\v8-regexp.js" />
+    <Content Include="Files\v8-v4\v8-richards.js" />
+    <Content Include="Files\v8-v4\v8-splay.js" />
     <Content Include="JSLitmus.js" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Sunspider Tokens.xlsx" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Jurassic\Jurassic.csproj">

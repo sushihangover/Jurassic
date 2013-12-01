@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Jurassic.Library
@@ -18,41 +19,30 @@ namespace Jurassic.Library
         internal static DateTime Parse(string input)
         {
             /* Regex tested using http://derekslager.com/blog/posts/2007/09/a-better-dotnet-regular-expression-tester.ashx
-             * These should succeed:
+             * With multiline on and the following source strings:
              * 2010
              * 2010-03
              * 2010-02-07
-             * 2010T12:34
-             * 2010-02T12:34:56
-             * 2010-02-07T12:34:56.012
-             * 2010T12:34Z
-             * 2010-02T12:34:56Z
-             * 2010-02-07T12:34:56.012Z
-             * 2010T12:34+09:00
-             * 2010-02T12:34:56+09:00
-             * 2010-02-07T12:34:56.012-09:00
-             * 2010-02-05T12:34:56.012
-             * 
-             * And these should fail:
-             * 201
-             * 2010-1
              * T12:34
-             * 12:34
-             * 2010-02T1:34:56
-             * 2010-02T12:3:56
-             * 2010-02T12:53:1
-             * 2010-02T12:53:12.1
-             * 2010-02T12:53:12.12
+             * T12:34:56
+             * T12:34:56.012
+             * T12:34Z
+             * T12:34:56Z
+             * T12:34:56.012Z
+             * T12:34+09:00
+             * T12:34:56+09:00
+             * T12:34:56.012-09:00
+             * 2010-02-05T12:34:56.012
              */
 
             var regex = new Regex(
                 @"^(  (?<year> [0-9]{4} )
                    (- (?<month> [0-9]{2} )
-                   (- (?<day> [0-9]{2} ))?)?)
+                   (- (?<day> [0-9]{2} ))?)?)?
                    (T (?<hour> [0-9]{2} )
                     : (?<minute> [0-9]{2} )
                    (: (?<second> [0-9]{2} )
-                  (\. (?<millisecond> [0-9]{3} ))?)?
+                  (\. (?<millisecond> [0-9]{1,9} ))?)?
                       (?<zone> Z | (?<zoneHours> [+-][0-9]{2} ) : (?<zoneMinutes> [0-9]{2} ) )?)?$",
                 RegexOptions.ExplicitCapture | RegexOptions.Singleline | RegexOptions.IgnorePatternWhitespace);
             
@@ -92,28 +82,33 @@ namespace Jurassic.Library
                     offsetInMinutes += 24 * 60;
                 }
 
-                // Parse the zone information (the default is UTC).
-                if (match.Groups["zone"].Value != string.Empty && match.Groups["zone"].Value != "Z")
+                // Parse the zone information.
+                DateTimeKind kind = DateTimeKind.Local;
+                if (match.Groups["zone"].Value != string.Empty)
                 {
-                    // Parse the numeric values.
-                    int zoneHours, zoneMinutes;
-                    if (int.TryParse(match.Groups["zoneHours"].Value, out zoneHours) == false)
-                        return DateTime.MinValue;
-                    if (int.TryParse(match.Groups["zoneMinutes"].Value, out zoneMinutes) == false)
-                        return DateTime.MinValue;
+                    kind = DateTimeKind.Utc;
+                    if (match.Groups["zone"].Value != "Z")
+                    {
+                        // Parse the numeric values.
+                        int zoneHours, zoneMinutes;
+                        if (int.TryParse(match.Groups["zoneHours"].Value, out zoneHours) == false)
+                            return DateTime.MinValue;
+                        if (int.TryParse(match.Groups["zoneMinutes"].Value, out zoneMinutes) == false)
+                            return DateTime.MinValue;
 
-                    // Validate the components.
-                    if (zoneHours >= 24)
-                        return DateTime.MinValue;
-                    if (zoneMinutes >= 60)
-                        return DateTime.MinValue;
+                        // Validate the components.
+                        if (zoneHours >= 24)
+                            return DateTime.MinValue;
+                        if (zoneMinutes >= 60)
+                            return DateTime.MinValue;
 
-                    // Calculate the zone offset, in minutes.
-                    offsetInMinutes -= zoneHours < 0 ? zoneHours * 60 - zoneMinutes : zoneHours * 60 + zoneMinutes;
+                        // Calculate the zone offset, in minutes.
+                        offsetInMinutes -= zoneHours < 0 ? zoneHours * 60 - zoneMinutes : zoneHours * 60 + zoneMinutes;
+                    }
                 }
 
                 // Create a date from the components.
-                var result = new DateTime(year, month, day, hour, minute, second, millisecond, DateTimeKind.Utc);
+                var result = new DateTime(year, month, day, hour, minute, second, millisecond, kind);
                 if (offsetInMinutes != 0)
                     result = result.AddMinutes(offsetInMinutes);
                 return result;
@@ -141,25 +136,12 @@ namespace Jurassic.Library
         /// <returns> A date. </returns>
         private static DateTime ParseUnstructured(string input)
         {
-            // Initialize the lookup tables, if necessary.
-            if (dayOfWeekNames == null)
-            {
-                var temp1 = PopulateDayOfWeekNames();
-                var temp2 = PopulateMonthNames();
-                var temp3 = PopulateTimeZones();
-                System.Threading.Thread.MemoryBarrier();
-                dayOfWeekNames = temp1;
-                monthNames = temp2;
-                timeZoneNames = temp3;
-            }
-
             // split the string into bite-sized pieces.
             var words = input.Split(new char[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
 
             // Classify each word.
             int year = -1, month = -1, day = -1;
             int hour = 0, minute = 0, second = 0, millisecond = 0;
-            bool twelveHourTime = false;
             DateTimeKind kind = DateTimeKind.Local;
             int offsetInMinutes = 0;
             List<int> unclassifiedNumbers = new List<int>();
@@ -185,27 +167,16 @@ namespace Jurassic.Library
                     int.TryParse(word, out timeZoneOffset);
                     offsetInMinutes -= (timeZoneOffset / 100) * 60 + (timeZoneOffset % 100);
                 }
-                else if (monthNames.TryGetValue(word, out numericValue) == true)
+                else if (monthNames.Value.TryGetValue(word, out numericValue) == true)
                 {
                     // If the word is a month name, guess the word is a month.
                     month = numericValue;
                 }
-                else if (timeZoneNames.TryGetValue(word, out numericValue) == true)
+                else if (timeZoneNames.Value.TryGetValue(word, out numericValue) == true)
                 {
                     // If the word is a time zone name, the word is a zone.
                     kind = DateTimeKind.Utc;
                     offsetInMinutes -= numericValue * 60;
-                }
-                else if (word.Equals("AM", StringComparison.OrdinalIgnoreCase))
-                {
-                    // This is a 12-hour time.
-                    twelveHourTime = true;
-                }
-                else if (word.Equals("PM", StringComparison.OrdinalIgnoreCase))
-                {
-                    // This is a 12-hour time.
-                    twelveHourTime = true;
-                    offsetInMinutes = 60 * 12;
                 }
                 else if (int.TryParse(word, out numericValue) == true)
                 {
@@ -238,10 +209,10 @@ namespace Jurassic.Library
                         return DateTime.MinValue;
                     if (int.TryParse(components[1], out minute) == false)
                         return DateTime.MinValue;
-                    if (components.Length >= 3 && int.TryParse(components[2], out second) == false)
+                    if (int.TryParse(components[2], out second) == false)
                         return DateTime.MinValue;
                 }
-                else if (dayOfWeekNames.Contains(word) == true)
+                else if (dayOfWeekNames.Value.Contains(word) == true)
                 {
                     // Day of week name is ignored.
                 }
@@ -291,16 +262,12 @@ namespace Jurassic.Library
                 return DateTime.MinValue;
             if (day < 1 || day > 31)
                 return DateTime.MinValue;
-            if (hour >= 24 || (twelveHourTime && hour >= 13))
+            if (hour >= 24)
                 return DateTime.MinValue;
             if (minute >= 60)
                 return DateTime.MinValue;
             if (second >= 60)
                 return DateTime.MinValue;
-
-            // If there exists an AM/PM designator, 12:00 is the same as 0:00.
-            if (twelveHourTime && hour == 12)
-                hour = 0;
 
             // Create a date from the components.
             var result = new DateTime(year, month, 1, hour, minute, second, millisecond, kind);
@@ -311,7 +278,8 @@ namespace Jurassic.Library
         }
 
         // A dictionary containing the names of all the days of the week.
-        private static HashSet<string> dayOfWeekNames;
+        private static Lazy<HashSet<string>> dayOfWeekNames =
+            new Lazy<HashSet<string>>(PopulateDayOfWeekNames, System.Threading.LazyThreadSafetyMode.PublicationOnly);
 
         /// <summary>
         /// Constructs a HashSet containing the names of days of the week.
@@ -335,7 +303,8 @@ namespace Jurassic.Library
 
         // A dictionary containing the names of all the months and a mapping to the number of the
         // month (1-12).
-        private static Dictionary<string, int> monthNames;
+        private static Lazy<Dictionary<string, int>> monthNames =
+            new Lazy<Dictionary<string, int>>(PopulateMonthNames, System.Threading.LazyThreadSafetyMode.PublicationOnly);
 
         /// <summary>
         /// Constructs a dictionary containing the names of all the months and a mapping to the
@@ -359,7 +328,8 @@ namespace Jurassic.Library
         }
 
         // A dictionary containing the time zone names.
-        private static Dictionary<string, int> timeZoneNames;
+        private static Lazy<Dictionary<string, int>> timeZoneNames =
+            new Lazy<Dictionary<string, int>>(PopulateTimeZones, System.Threading.LazyThreadSafetyMode.PublicationOnly);
 
         /// <summary>
         /// Constructs a dictionary containing the names of all the time zones and a mapping to the

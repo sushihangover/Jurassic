@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
@@ -23,10 +24,9 @@ namespace Jurassic.Library
 
             // If the property is an accessor property, the state of the writable flag is dependant
             // whether the setter function exists. 
-            if (this.value is PropertyAccessorValue)
+            if (this.IsAccessor == true)
             {
-                this.attributes |= PropertyAttributes.IsAccessorProperty;
-                if (this.Setter != null)
+                if (this.SetAccessor != null)
                     this.attributes |= PropertyAttributes.Writable;
                 else
                     this.attributes &= ~PropertyAttributes.Writable;
@@ -49,7 +49,7 @@ namespace Jurassic.Library
         /// <summary>
         /// Used in several APIs to indicate that a property doesn't exist.
         /// </summary>
-        internal static readonly PropertyDescriptor Undefined = new PropertyDescriptor(null, PropertyAttributes.Sealed);
+        public static readonly PropertyDescriptor Undefined = new PropertyDescriptor(null, PropertyAttributes.Sealed);
 
         /// <summary>
         /// Gets a value that indicates whether the property exists.
@@ -94,34 +94,34 @@ namespace Jurassic.Library
         }
 
         /// <summary>
-        /// Gets the raw property value.  Does not call the get accessor, even if one is present.
+        /// Gets the raw property value.  Does not call the get accessor, if present.
         /// </summary>
         public object Value
         {
             get { return this.value; }
         }
 
-        ///// <summary>
-        ///// Gets the property value, calling the get accessor, if present.
-        ///// </summary>
-        ///// <param name="thisObject"> The context of the get accessor, if present. </param>
-        ///// <returns> The property value. </returns>
-        //public object GetValue(ObjectInstance thisObject)
-        //{
-        //    // Get the property value.
-        //    object result = this.Value;
+        /// <summary>
+        /// Gets the property value, calling the get accessor, if present.
+        /// </summary>
+        /// <param name="thisObject"> The context of the get accessor, if present. </param>
+        /// <returns> The property value. </returns>
+        public object GetValue(ObjectInstance thisObject)
+        {
+            // Get the property value.
+            object result = this.Value;
 
-        //    // Deal with accessor properties.
-        //    if (result is PropertyAccessorValue)
-        //    {
-        //        if (((PropertyAccessorValue)result).GetAccessor == null)
-        //            return Undefined.Value;
-        //        return ((PropertyAccessorValue)result).GetAccessor.CallLateBound(thisObject);
-        //    }
+            // Deal with accessor properties.
+            if (result is PropertyAccessorValue)
+            {
+                if (((PropertyAccessorValue)result).GetAccessor == null)
+                    return Undefined.Value;
+                return ((PropertyAccessorValue)result).GetAccessor.CallLateBound(thisObject);
+            }
 
-        //    // Return the value.
-        //    return result;
-        //}
+            // Return the value.
+            return result;
+        }
 
         /// <summary>
         /// Returns a string representing the current object.
@@ -139,7 +139,38 @@ namespace Jurassic.Library
         //     GET AND SET ACCESSORS
         //_________________________________________________________________________________________
 
+        /// <summary>
+        /// Represents a pair of callbacks used for accessor properties.
+        /// </summary>
+        private sealed class PropertyAccessorValue
+        {
+            private FunctionInstance getAccessor;
+            private FunctionInstance setAccessor;
 
+            public PropertyAccessorValue(FunctionInstance getAccessor, FunctionInstance setAccessor)
+            {
+                if (getAccessor == null)
+                    throw new ArgumentNullException("getAccessor");
+                this.getAccessor = getAccessor;
+                this.setAccessor = setAccessor;
+            }
+
+            /// <summary>
+            /// Gets the function that is called when the property value is retrieved.
+            /// </summary>
+            public FunctionInstance GetAccessor
+            {
+                get { return this.getAccessor; }
+            }
+
+            /// <summary>
+            /// Gets the function that is called when the property value is modified.
+            /// </summary>
+            public FunctionInstance SetAccessor
+            {
+                get { return this.setAccessor; }
+            }
+        }
 
         /// <summary>
         /// Gets a value that indicates whether the value is computed using accessor functions.
@@ -154,14 +185,14 @@ namespace Jurassic.Library
         /// property value is computed using accessor functions.  Returns <c>null</c> if the
         /// property is not a accessor property.
         /// </summary>
-        public FunctionInstance Getter
+        public FunctionInstance GetAccessor
         {
             get
             {
                 var accessor = this.value as PropertyAccessorValue;
                 if (accessor == null)
                     return null;
-                return accessor.Getter;
+                return accessor.GetAccessor;
             }
         }
 
@@ -170,14 +201,14 @@ namespace Jurassic.Library
         /// property value is computed using accessor functions.  Returns <c>null</c> if the
         /// property is not a accessor property.
         /// </summary>
-        public FunctionInstance Setter
+        public FunctionInstance SetAccessor
         {
             get
             {
                 var accessor = this.value as PropertyAccessorValue;
                 if (accessor == null)
                     return null;
-                return accessor.Setter;
+                return accessor.SetAccessor;
             }
         }
 
@@ -218,41 +249,30 @@ namespace Jurassic.Library
             if (obj.HasProperty("value"))
                 value = obj["value"];
 
-            // The descriptor is an accessor if get or set is present.
-            bool isAccessor = false;
-
             // Read get accessor.
-            FunctionInstance getter = defaults.Getter;
+            FunctionInstance getter = defaults.GetAccessor;
             if (obj.HasProperty("get"))
             {
                 if (obj.HasProperty("value"))
-                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors cannot have both 'get' and 'value' set");
+                    throw new JavaScriptException("TypeError", "Property descriptors cannot have both 'get' and 'value' set");
                 if (obj.HasProperty("writable"))
-                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors with 'get' or 'set' defined must not have 'writable' set");
-                if (obj["get"] is FunctionInstance)
-                    getter = (FunctionInstance)obj["get"];
-                else if (TypeUtilities.IsUndefined(obj["get"]) == true)
-                    getter = null;
-                else
-                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptor 'get' must be a function");
-                isAccessor = true;
+                    throw new JavaScriptException("TypeError", "Property descriptors with 'set' defined must not have 'writable' set");
+                if ((obj["get"] is FunctionInstance) == false)
+                    throw new JavaScriptException("TypeError", "Property descriptor 'get' must be a function");
+                getter = (FunctionInstance)obj["get"];
             }
 
             // Read set accessor.
-            FunctionInstance setter = defaults.Setter;
+            FunctionInstance setter = defaults.SetAccessor;
             if (obj.HasProperty("set"))
             {
                 if (obj.HasProperty("value"))
-                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors cannot have both 'set' and 'value' set");
+                    throw new JavaScriptException("TypeError", "Property descriptors cannot have both 'set' and 'value' set");
                 if (obj.HasProperty("writable"))
-                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptors with 'get' or 'set' defined must not have 'writable' set");
-                if (obj["set"] is FunctionInstance)
-                    setter = (FunctionInstance)obj["set"];
-                else if (TypeUtilities.IsUndefined(obj["set"]) == true)
-                    setter = null;
-                else
-                    throw new JavaScriptException(obj.Engine, "TypeError", "Property descriptor 'set' must be a function");
-                isAccessor = true;
+                    throw new JavaScriptException("TypeError", "Property descriptors with 'set' defined must not have 'writable' set");
+                if ((obj["set"] is FunctionInstance) == false)
+                    throw new JavaScriptException("TypeError", "Property descriptor 'set' must be a function");
+                setter = (FunctionInstance)obj["set"];
             }
 
             // Build up the attributes enum.
@@ -266,7 +286,7 @@ namespace Jurassic.Library
 
             // Either a value or an accessor is possible.
             object descriptorValue = value;
-            if (isAccessor == true)
+            if (getter != null || setter != null)
                 descriptorValue = new PropertyAccessorValue(getter, setter);
 
             // Create the new property descriptor.
@@ -277,14 +297,11 @@ namespace Jurassic.Library
         /// Populates an object with the following properties: configurable, writable, enumerable,
         /// value, get, set.
         /// </summary>
-        /// <param name="engine"> The script engine used to create a new object. </param>
         /// <returns> An object with the information in this property descriptor set as individual
         /// properties. </returns>
-        public ObjectInstance ToObject(ScriptEngine engine)
+        public ObjectInstance ToObject()
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
-            var result = engine.Object.Construct();
+            var result = GlobalObject.Object.Construct();
             if (this.IsAccessor == false)
             {
                 result["value"] = this.Value;
@@ -292,8 +309,8 @@ namespace Jurassic.Library
             }
             else
             {
-                result["get"] = this.Getter;
-                result["set"] = this.Setter;
+                result["get"] = this.GetAccessor;
+                result["set"] = this.SetAccessor;
             }
             result["enumerable"] = this.IsEnumerable;
             result["configurable"] = this.IsConfigurable;

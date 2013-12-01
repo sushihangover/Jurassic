@@ -1,30 +1,31 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq.Expressions;
 using Jurassic.Library;
 
 namespace Jurassic.Compiler
 {
+
+    internal enum ScriptContext
+    {
+        Global,
+        Function,
+        Eval,
+    }
+
     /// <summary>
     /// Converts a series of tokens into an abstract syntax tree.
     /// </summary>
     internal sealed class Parser
     {
-        private ScriptEngine engine;
         private Lexer lexer;
-        private SourceCodePosition positionBeforeWhitespace, positionAfterWhitespace;
         private Token nextToken;
         private bool consumedLineTerminator;
-        private ParserExpressionState expressionState;
-        private Scope initialScope;
-        private Scope currentScope;
-        private MethodOptimizationHints methodOptimizationHints;
-        private List<string> labelsForCurrentStatement = new List<string>();
-        private Token endToken;
-        private CompilerOptions options;
-        private CodeContext context;
-        private bool strictMode;
-
+        private ParserContext context;
+        private FunctionContext executionContext;
+        private StatementContextStack statementContextStack = new StatementContextStack();
+        private SymbolDocumentInfo document;
 
 
         //     INITIALIZATION
@@ -33,45 +34,17 @@ namespace Jurassic.Compiler
         /// <summary>
         /// Creates a Parser instance with the given lexer supplying the tokens.
         /// </summary>
-        /// <param name="engine"> The associated script engine. </param>
         /// <param name="lexer"> The lexical analyser that provides the tokens. </param>
-        /// <param name="initialScope"> The initial variable scope. </param>
-        /// <param name="options"> Options that influence the compiler. </param>
-        /// <param name="context"> The context of the code (global, function or eval). </param>
-        public Parser(ScriptEngine engine, Lexer lexer, Scope initialScope, CompilerOptions options, CodeContext context)
+        /// <param name="scriptContext"> The context the code will run in. </param>
+        public Parser(Lexer lexer, ScriptContext scriptContext)
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
             if (lexer == null)
                 throw new ArgumentNullException("lexer");
-            if (initialScope == null)
-                throw new ArgumentNullException("initialScope");
-            this.engine = engine;
             this.lexer = lexer;
-            this.lexer.ParserExpressionState = ParserExpressionState.Literal;
-            this.currentScope = this.initialScope = initialScope;
-            this.methodOptimizationHints = new MethodOptimizationHints();
-            this.options = options;
-            this.context = context;
-            this.StrictMode = options.ForceStrictMode;
+            this.lexer.ParserContextCallback = () => this.context;
+            this.executionContext = new FunctionContext(this, scriptContext);
+            this.document = Expression.SymbolDocument(this.lexer.SourcePath);
             this.Consume();
-        }
-
-        /// <summary>
-        /// Creates a parser that can read the body of a function.
-        /// </summary>
-        /// <param name="parser"> The parser for the parent context. </param>
-        /// <param name="scope"> The function scope. </param>
-        /// <returns> A new parser. </returns>
-        private static Parser CreateFunctionBodyParser(Parser parser, Scope scope)
-        {
-            var result = (Parser)parser.MemberwiseClone();
-            result.currentScope = result.initialScope = scope;
-            result.methodOptimizationHints = new MethodOptimizationHints();
-            result.context = CodeContext.Function;
-            result.endToken = PunctuatorToken.RightBrace;
-            result.DirectivePrologueProcessedCallback = null;
-            return result;
         }
 
 
@@ -84,23 +57,7 @@ namespace Jurassic.Compiler
         /// </summary>
         public int LineNumber
         {
-            get { return this.positionAfterWhitespace.Line; }
-        }
-
-        /// <summary>
-        /// Gets the position just after the last character of the previously consumed token.
-        /// </summary>
-        public SourceCodePosition PositionBeforeWhitespace
-        {
-            get { return this.positionBeforeWhitespace; }
-        }
-
-        /// <summary>
-        /// Gets the position of the first character of the next token.
-        /// </summary>
-        public SourceCodePosition PositionAfterWhitespace
-        {
-            get { return this.positionAfterWhitespace; }
+            get { return this.lexer.LineNumber; }
         }
 
         /// <summary>
@@ -108,25 +65,7 @@ namespace Jurassic.Compiler
         /// </summary>
         public string SourcePath
         {
-            get { return this.lexer.Source.Path; }
-        }
-
-        /// <summary>
-        /// Gets or sets the scope that variables are declared in.
-        /// </summary>
-        public Scope Scope
-        {
-            get { return this.currentScope; }
-            set { this.currentScope = value; }
-        }
-
-        /// <summary>
-        /// Gets or sets the scope that function declarations are declared in.
-        /// </summary>
-        public Scope InitialScope
-        {
-            get { return this.initialScope; }
-            set { this.initialScope = value; }
+            get { return this.lexer.SourcePath; }
         }
 
         /// <summary>
@@ -134,50 +73,52 @@ namespace Jurassic.Compiler
         /// </summary>
         public bool StrictMode
         {
-            get { return this.strictMode; }
-            set
-            {
-                this.strictMode = value;
-                this.lexer.StrictMode = value;
-            }
-        }
-
-        /// <summary>
-        /// Gets or sets a callback that is called after the directive prologue has been processed.
-        /// This callback will be called even if no directive prologue exists.
-        /// </summary>
-        public Action<Parser> DirectivePrologueProcessedCallback
-        {
             get;
             set;
         }
 
         /// <summary>
-        /// Gets optimization information about the code that was parsed (Parse() must be called
-        /// first).
+        /// Gets or sets a value that indicates whether the javascript source can be debugged.
+        /// Setting this to <c>true</c> disables optimizations and negatively impacts memory usage.
         /// </summary>
-        public MethodOptimizationHints MethodOptimizationHints
+        public bool EnableDebugging
         {
-            get { return this.methodOptimizationHints; }
+            get;
+            set;
         }
-
 
 
         //     VARIABLES
         //_________________________________________________________________________________________
-     
+
+        /// <summary>
+        /// Adds a local variable declaration.
+        /// </summary>
+        /// <param name="name"> The name of the variable. </param>
+        /// <param name="initialValue"> The initial value of the variable, at the top of the
+        /// function.  <c>null</c> is the default, which corresponds to an initial value of
+        /// <c>undefined</c>. </param>
+        private void AddVariable(string name, Expression initialValue = null)
+        {
+            // Check the variable name is valid.
+            this.ValidateVariableName(name);
+
+            // Add the variable to the function context.
+            this.executionContext.AddVariable(name, initialValue);
+        }
+                    
         /// <summary>
         /// Throws an exception if the variable name is invalid.
         /// </summary>
         /// <param name="name"> The name of the variable to check. </param>
         private void ValidateVariableName(string name)
         {
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException("name cannot be null or empty.", "name");
+
             // In strict mode, the variable name cannot be "eval" or "arguments".
             if (this.StrictMode == true && (name == "eval" || name == "arguments"))
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("The variable name cannot be '{0}' in strict mode.", name), this.LineNumber, this.SourcePath);
-
-            // Record each occurance of a variable name.
-            this.methodOptimizationHints.EncounteredVariable(name);
+                throw new JavaScriptException("SyntaxError", string.Format("The variable name cannot be '{0}' in strict mode.", name), this.LineNumber, this.SourcePath);
         }
 
 
@@ -188,23 +129,18 @@ namespace Jurassic.Compiler
         /// <summary>
         /// Discards the current token and reads the next one.
         /// </summary>
-        /// <param name="expressionState"> Indicates whether the next token can be a literal or an
+        /// <param name="context"> Indicates whether the next token can be a literal or an
         /// operator. </param>
-        private void Consume(ParserExpressionState expressionState = ParserExpressionState.Literal)
+        private void Consume(ParserContext context = ParserContext.LiteralContext)
         {
-            this.expressionState = expressionState;
-            this.lexer.ParserExpressionState = expressionState;
+            this.context = context;
             this.consumedLineTerminator = false;
-            this.positionBeforeWhitespace = new SourceCodePosition(this.lexer.LineNumber, this.lexer.ColumnNumber);
-            this.positionAfterWhitespace = this.positionBeforeWhitespace;
             while (true)
             {
                 this.nextToken = this.lexer.NextToken();
                 if ((this.nextToken is WhiteSpaceToken) == false)
                     break;
-                if (((WhiteSpaceToken)this.nextToken).LineTerminatorCount > 0)
-                    this.consumedLineTerminator = true;
-                this.positionAfterWhitespace = new SourceCodePosition(this.lexer.LineNumber, this.lexer.ColumnNumber);
+                this.consumedLineTerminator = true;
             }
         }
 
@@ -218,7 +154,7 @@ namespace Jurassic.Compiler
             if (this.nextToken == token)
                 Consume();
             else
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected '{0}' but found {1}", token.Text, Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
+                throw new JavaScriptException("SyntaxError", string.Format("Expected '{0}'", token.Text), this.LineNumber, this.SourcePath);
         }
 
         /// <summary>
@@ -236,16 +172,10 @@ namespace Jurassic.Compiler
             }
             else
             {
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected identifier but found {0}", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
+                throw new JavaScriptException("SyntaxError", "Expected identifier", this.LineNumber, this.SourcePath);
             }
         }
 
-        /// <summary>
-        /// Returns a value that indicates whether the current position is a valid position to end
-        /// a statement.
-        /// </summary>
-        /// <returns> <c>true</c> if the current position is a valid position to end a statement;
-        /// <c>false</c> otherwise. </returns>
         private bool AtValidEndOfStatement()
         {
             // A statement can be terminator in four ways: by a semi-colon (;), by a right brace (}),
@@ -256,10 +186,6 @@ namespace Jurassic.Compiler
                 this.nextToken == null;
         }
 
-        /// <summary>
-        /// Indicates that the next token should end the current statement.  This implies that the
-        /// next token is a semicolon, right brace or a line terminator.
-        /// </summary>
         private void ExpectEndOfStatement()
         {
             if (this.nextToken == PunctuatorToken.Semicolon)
@@ -281,7 +207,7 @@ namespace Jurassic.Compiler
                     return;
 
                 // Otherwise, throw an error.
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected ';' but found {0}", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
+                throw new JavaScriptException("SyntaxError", "Expected ';'", this.LineNumber, this.SourcePath);
             }
         }
 
@@ -295,78 +221,95 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <returns> An expression that can be executed to run the program represented by the
         /// source code. </returns>
-        public Statement Parse()
+        public Expression Parse()
         {
-            // Read the directive prologue.
-            var result = new BlockStatement(new string[0]);
-            while (true)
+            // Read zero or more statements.
+            var statements = new List<Expression>();
+            while (this.nextToken != null)
             {
-                // Check if we should stop parsing.
-                if (this.nextToken == this.endToken)
-                    break;
-
-                // A directive must start with a string literal token.  Record it now so that the
-                // escape sequence and line continuation information is not lost.
-                var directiveToken = this.nextToken as StringLiteralToken;
-                if (directiveToken == null)
-                    break;
-
-                // Directives cannot have escape sequences or line continuations.
-                if (directiveToken.EscapeSequenceCount != 0 || directiveToken.LineContinuationCount != 0)
-                    break;
-
-                // If the statement starts with a string literal, it must be an expression.
-                var beforeInitialToken = this.PositionAfterWhitespace;
-                var expression = ParseExpression(PunctuatorToken.Semicolon);
-
-                // The statement must be added to the AST so that eval("'test'") works.
-                var initialStatement = new ExpressionStatement(this.labelsForCurrentStatement, expression);
-                initialStatement.SourceSpan = new SourceCodeSpan(beforeInitialToken, this.PositionBeforeWhitespace);
-                result.Statements.Add(initialStatement);
-
-                // In order for the expression to be part of the directive prologue, it must
-                // consist solely of a string literal.
-                if ((expression is LiteralExpression) == false)
-                    break;
-
-                // Strict mode directive.
-                if (directiveToken.Value == "use strict")
-                    this.StrictMode = true;
-
-                // Read the end of the statement.  This must happen last so that the lexer has a
-                // chance to act on the strict mode flag.
-                ExpectEndOfStatement();
-            }
-
-            // Call the directive prologue callback.
-            if (this.DirectivePrologueProcessedCallback != null)
-                this.DirectivePrologueProcessedCallback(this);
-
-            // Read zero or more regular statements.
-            while (true)
-            {
-                // Check if we should stop parsing.
-                if (this.nextToken == this.endToken)
+                // Check if we are at the end of a function.
+                if (this.executionContext.ScriptContext == ScriptContext.Function && this.nextToken == PunctuatorToken.RightBrace)
                     break;
 
                 // Parse a single statement.
-                result.Statements.Add(ParseStatement());
+                statements.Add(ParseSourceStatement());
             }
 
-            return result;
+            // Bind any local variables at the top of the function/global code.
+            var initializationStatements = new List<Expression>(this.executionContext.LocalVariables.Count + 2);
+            initializationStatements.Add(Expression.DebugInfo(this.document, 1, 1, 1, int.MaxValue));
+            
+            foreach (KeyValuePair<string, Expression> variableNameAndValue in this.executionContext.LocalVariables)
+            {
+                string variableName = variableNameAndValue.Key;
+                initializationStatements.Add(Expression.Call(
+                    this.executionContext.LexicalEnvironment,
+                    ReflectionHelpers.IEnvironmentRecord_CreateMutableBinding,
+                    Expression.Constant(variableName),
+                    Expression.Constant(true)));
+
+                // If the variable is a function, initialize the variable.
+                Expression initialValue = variableNameAndValue.Value;
+                if (initialValue != null)
+                    initializationStatements.Add(new MemberJSExpression(variableName).GetSetterExpression(
+                        this.executionContext.LexicalEnvironment, initialValue));
+            }
+
+            if (this.executionContext.ScriptContext != ScriptContext.Function)
+            {
+                // Initialize the return value for the block to "undefined".
+                initializationStatements.Add(Expression.Assign(this.executionContext.ReturnValue, ExpressionTreeHelpers.Undefined()));
+
+                // Construct a block expression containing the initialization statements and the
+                // program statements.
+                return Expression.Block(
+                    new ParameterExpression[] { this.executionContext.ReturnValue },
+                    ExpressionTreeHelpers.Block(initializationStatements),
+                    ExpressionTreeHelpers.Block(statements),
+                    this.executionContext.ReturnValue);
+            }
+            else
+            {
+                // Construct a block expression containing the initialization statements and the
+                // program statements.
+                return Expression.Block(
+                    ExpressionTreeHelpers.Block(initializationStatements),
+                    ExpressionTreeHelpers.Block(statements),
+                    Expression.Label(this.executionContext.EndOfProgram, ExpressionTreeHelpers.Undefined()));
+            }
+        }
+
+        /// <summary>
+        /// Parses any statement.
+        /// </summary>
+        /// <returns> An expression that represents the statement. </returns>
+        private Expression ParseSourceStatement()
+        {
+            if (this.nextToken == KeywordToken.Function)
+                return ParseFunction();
+            return ParseStatement();
         }
 
         /// <summary>
         /// Parses any statement other than a function declaration.
         /// </summary>
         /// <returns> An expression that represents the statement. </returns>
-        private Statement ParseStatement()
+        private Expression ParseStatement()
         {
-            // This is a new statement so clear any labels.
-            this.labelsForCurrentStatement.Clear();
+            // Push an empty context for the new statement.
+            this.statementContextStack.BeginStatement();
+
+            // Record the line number of the start of the statement.
+            int startLine = this.LineNumber;
 
             // Parse the statement.
-            Statement statement = ParseStatementNoNewContext();
+            Expression statement = ParseStatementNoNewContext();
+
+            // Record the line number of the end of the statement and insert debug info.
+            statement = Expression.Block(Expression.DebugInfo(this.document, startLine, 1, Math.Max(startLine, this.LineNumber - 1), int.MaxValue), statement);
+
+            // Pop any context related to the current statement.
+            this.statementContextStack.EndStatement();
 
             return statement;
         }
@@ -376,7 +319,7 @@ namespace Jurassic.Compiler
         /// statement context.
         /// </summary>
         /// <returns> An expression that represents the statement. </returns>
-        private Statement ParseStatementNoNewContext()
+        private Expression ParseStatementNoNewContext()
         {
             if (this.nextToken == PunctuatorToken.LeftBrace)
                 return ParseBlock();
@@ -408,10 +351,8 @@ namespace Jurassic.Compiler
                 return ParseTry();
             if (this.nextToken == KeywordToken.Debugger)
                 return ParseDebugger();
-            if (this.nextToken == KeywordToken.Function)
-                return ParseFunctionDeclaration();
             if (this.nextToken == null)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected end of input", this.LineNumber, this.SourcePath);
+                throw new JavaScriptException("SyntaxError", "Unexpected end of input", this.LineNumber, this.SourcePath);
 
             // The statement is either a label or an expression.
             return ParseLabelOrExpressionStatement();
@@ -420,16 +361,17 @@ namespace Jurassic.Compiler
         /// <summary>
         /// Parses a block of statements.
         /// </summary>
-        /// <returns> A BlockStatement containing the statements. </returns>
+        /// <returns> An expression containing the statements. </returns>
         /// <remarks> The value of a block statement is the value of the last statement in the block,
         /// or undefined if there are no statements in the block. </remarks>
-        private BlockStatement ParseBlock()
+        private Expression ParseBlock()
         {
             // Consume the start brace ({).
-            this.Expect(PunctuatorToken.LeftBrace);
+            Debug.Assert(this.nextToken == PunctuatorToken.LeftBrace);
+            this.Consume();
 
             // Read zero or more statements.
-            var result = new BlockStatement(this.labelsForCurrentStatement);
+            var statements = new List<Expression>();
             while (true)
             {
                 // Check for the end brace (}).
@@ -437,41 +379,35 @@ namespace Jurassic.Compiler
                     break;
 
                 // Parse a single statement.
-                result.Statements.Add(ParseStatement());
+                statements.Add(ParseStatement());
             }
 
             // Consume the end brace.
-            this.Expect(PunctuatorToken.RightBrace);
-            return result;
+            this.Consume();
+
+            // Construct a block expression.
+            return ExpressionTreeHelpers.Block(statements);
         }
 
         /// <summary>
         /// Parses a var statement.
         /// </summary>
-        /// <returns> A var statement. </returns>
-        private VarStatement ParseVar()
+        /// <returns> An expression representing the var statement. </returns>
+        private Expression ParseVar()
         {
-            var result = new VarStatement(this.labelsForCurrentStatement, this.currentScope);
-
             // Read past the var token.
             this.Expect(KeywordToken.Var);
 
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
+            // There can be multiple initializers.
+            var statements = new List<Expression>(1);
 
-            // There can be multiple declarations.
             while (true)
             {
-                var declaration = new VariableDeclaration();
-
                 // The next token must be a variable name.
-                declaration.VariableName = this.ExpectIdentifier();
-                ValidateVariableName(declaration.VariableName);
+                string variableName = this.ExpectIdentifier();
 
                 // Add the variable to the current function's list of local variables.
-                this.currentScope.DeclareVariable(declaration.VariableName,
-                    this.context == CodeContext.Function ? null : new LiteralExpression(Undefined.Value),
-                    writable: true, deletable: this.context == CodeContext.Eval);
+                this.AddVariable(variableName);
 
                 // The next token is either an equals sign (=), a semi-colon or a comma.
                 if (this.nextToken == PunctuatorToken.Assignment)
@@ -480,107 +416,94 @@ namespace Jurassic.Compiler
                     this.Expect(PunctuatorToken.Assignment);
 
                     // Read the setter expression.
-                    declaration.InitExpression = ParseExpression(PunctuatorToken.Semicolon, PunctuatorToken.Comma);
+                    var setterExpression = ParseJSExpression(PunctuatorToken.Semicolon, PunctuatorToken.Comma);
 
-                    // Record the portion of the source document that will be highlighted when debugging.
-                    declaration.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+                    // Construct a new initialization expression that initializes the variable.
+                    statements.Add(new AssignmentJSExpression(variableName, setterExpression).ToExpression(
+                        this.executionContext.LexicalEnvironment));
                 }
 
-                // Add the declaration to the result.
-                result.Declarations.Add(declaration);
-
                 // Check if we are at the end of the statement.
-                if (this.AtValidEndOfStatement() == true && this.nextToken != PunctuatorToken.Comma)
+                if (this.AtValidEndOfStatement() == true)
                     break;
 
                 // Read past the comma token.
                 this.Expect(PunctuatorToken.Comma);
-
-                // Keep track of the start of the statement so that source debugging works correctly.
-                start = this.PositionAfterWhitespace;
             }
 
             // Consume the end of the statement.
             this.ExpectEndOfStatement();
 
-            return result;
+            // Construct a block expression.
+            return ExpressionTreeHelpers.Block(statements);
         }
 
         /// <summary>
         /// Parses an empty statement.
         /// </summary>
-        /// <returns> An empty statement. </returns>
-        private Statement ParseEmpty()
+        /// <returns> An empty expression. </returns>
+        private Expression ParseEmpty()
         {
-            var result = new EmptyStatement(this.labelsForCurrentStatement);
-
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
-            // Read past the semicolon.
-            this.Expect(PunctuatorToken.Semicolon);
-
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-
-            return result;
+            this.Consume();
+            return Expression.Empty();
         }
 
         /// <summary>
         /// Parses an if statement.
         /// </summary>
         /// <returns> An expression representing the if statement. </returns>
-        private IfStatement ParseIf()
+        private Expression ParseIf()
         {
-            var result = new IfStatement(this.labelsForCurrentStatement);
-
             // Consume the if keyword.
-            this.Expect(KeywordToken.If);
+            Debug.Assert(this.nextToken == KeywordToken.If);
+            this.Consume();
 
             // Read the left parenthesis.
             this.Expect(PunctuatorToken.LeftParenthesis);
 
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Parse the condition.
-            result.Condition = ParseExpression(PunctuatorToken.RightParenthesis);
-
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+            var condition = ParseExpression(PunctuatorToken.RightParenthesis);
 
             // Read the right parenthesis.
             this.Expect(PunctuatorToken.RightParenthesis);
 
             // Read the statements that will be executed when the condition is true.
-            result.IfClause = ParseStatement();
+            var trueStatements = ParseStatement();
 
             // Optionally, read the else statement.
+            Expression falseStatements = Expression.Empty();
             if (this.nextToken == KeywordToken.Else)
             {
                 // Consume the else keyword.
                 this.Consume();
 
                 // Read the statements that will be executed when the condition is false.
-                result.ElseClause = ParseStatement();
+                falseStatements = ParseStatement();
             }
 
-            return result;
+            // Construct an if-then-else expression.
+            return Expression.IfThenElse(
+                ExpressionTreeHelpers.ToBoolean(condition),
+                trueStatements,
+                falseStatements);
         }
 
         /// <summary>
         /// Parses a do statement.
         /// </summary>
         /// <returns> An expression representing the do statement. </returns>
-        private DoWhileStatement ParseDo()
+        private Expression ParseDo()
         {
-            var result = new DoWhileStatement(this.labelsForCurrentStatement);
-
             // Consume the do keyword.
-            this.Expect(KeywordToken.Do);
+            Debug.Assert(this.nextToken == KeywordToken.Do);
+            this.Consume();
+
+            // Set up the labels that will be jumped to if the break or continue statements are
+            // encountered.
+            this.statementContextStack.Loop("do");
 
             // Read the statements that will be executed in the loop body.
-            result.Body = ParseStatement();
+            var statements = ParseStatement();
 
             // Read the while keyword.
             this.Expect(KeywordToken.While);
@@ -588,16 +511,8 @@ namespace Jurassic.Compiler
             // Read the left parenthesis.
             this.Expect(PunctuatorToken.LeftParenthesis);
 
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Parse the condition.
-            start = this.PositionAfterWhitespace;
-            result.ConditionStatement = new ExpressionStatement(ParseExpression(PunctuatorToken.RightParenthesis));
-            result.ConditionStatement.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+            var condition = ParseExpression(PunctuatorToken.RightParenthesis);
 
             // Read the right parenthesis.
             this.Expect(PunctuatorToken.RightParenthesis);
@@ -605,42 +520,74 @@ namespace Jurassic.Compiler
             // Consume the end of the statement.
             this.ExpectEndOfStatement();
 
-            return result;
+            // Construct a loop expression.
+            // while (true) {
+            //   <body statements>
+            //
+            //   continue-target:
+            //   if (condition == false)
+            //     goto break-target;
+            // }
+            // break-target:
+            return
+                Expression.Loop(
+                    Expression.Block(
+                        statements,
+                        Expression.Label(this.CurrentStatement.ContinueTarget),
+                        Expression.IfThen(Expression.IsFalse(ExpressionTreeHelpers.ToBoolean(condition)), Expression.Break(this.CurrentStatement.BreakTarget))
+                    ),
+                    this.CurrentStatement.BreakTarget);
         }
 
         /// <summary>
         /// Parses a while statement.
         /// </summary>
-        /// <returns> A while statement. </returns>
-        private WhileStatement ParseWhile()
+        /// <returns> An expression representing the while statement. </returns>
+        private Expression ParseWhile()
         {
-            var result = new WhileStatement(this.labelsForCurrentStatement);
-
             // Consume the while keyword.
-            this.Expect(KeywordToken.While);
+            Debug.Assert(this.nextToken == KeywordToken.While);
+            this.Consume();
 
             // Read the left parenthesis.
             this.Expect(PunctuatorToken.LeftParenthesis);
 
             // Parse the condition.
-            var start = this.PositionAfterWhitespace;
-            result.ConditionStatement = new ExpressionStatement(ParseExpression(PunctuatorToken.RightParenthesis));
-            result.ConditionStatement.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+            var condition = ParseExpression(PunctuatorToken.RightParenthesis);
 
             // Read the right parenthesis.
             this.Expect(PunctuatorToken.RightParenthesis);
 
-            // Read the statements that will be executed in the loop body.
-            result.Body = ParseStatement();
+            // Set up the labels that will be jumped to if the break or continue statements are
+            // encountered.
+            this.statementContextStack.Loop("while");
 
-            return result;
+            // Read the statements that will be executed in the loop body.
+            var statements = ParseStatement();
+
+            // Construct a loop expression.
+            // while (true) {
+            //   continue-target:
+            //   if (condition == false)
+            //     goto break-target;
+            //
+            //   <body statements>
+            // }
+            // break-target:
+            return
+                Expression.Loop(
+                    Expression.Block(
+                        Expression.IfThen(Expression.IsFalse(ExpressionTreeHelpers.ToBoolean(condition)), Expression.Break(this.CurrentStatement.BreakTarget)),
+                        statements
+                    ),
+                    this.CurrentStatement.BreakTarget, this.CurrentStatement.ContinueTarget);
         }
 
         /// <summary>
-        /// Parses a for statement or a for-in statement.
+        /// Parses a for statement.
         /// </summary>
-        /// <returns> A for statement or a for-in statement. </returns>
-        private Statement ParseFor()
+        /// <returns> An expression representing the for statement. </returns>
+        private Expression ParseFor()
         {
             // Consume the for keyword.
             this.Expect(KeywordToken.For);
@@ -648,14 +595,11 @@ namespace Jurassic.Compiler
             // Read the left parenthesis.
             this.Expect(PunctuatorToken.LeftParenthesis);
 
-            // The initialization statement.
-            Statement initializationStatement = null;
+            // The initialization expression.  Is null for a for-in statement.
+            Expression initializationExpression = null;
 
             // The for-in expression needs a variable to assign to.  Is null for a regular for statement.
-            IReferenceExpression forInReference = null;
-
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
+            MemberJSExpression forInReference = null;
 
             if (this.nextToken == KeywordToken.Var)
             {
@@ -663,24 +607,18 @@ namespace Jurassic.Compiler
                 this.Expect(KeywordToken.Var);
 
                 // There can be multiple initializers (but not for for-in statements).
-                var varStatement = new VarStatement(this.labelsForCurrentStatement, this.currentScope);
-                initializationStatement = varStatement;
+                var initializationStatements = new List<Expression>(1);
 
                 // Only a simple variable name is allowed for for-in statements.
                 bool cannotBeForIn = false;
 
                 while (true)
                 {
-                    var declaration = new VariableDeclaration();
-
                     // The next token must be a variable name.
-                    declaration.VariableName = this.ExpectIdentifier();
-                    ValidateVariableName(declaration.VariableName);
+                    string variableName = this.ExpectIdentifier();
 
                     // Add the variable to the current function's list of local variables.
-                    this.currentScope.DeclareVariable(declaration.VariableName,
-                        this.context == CodeContext.Function ? null : new LiteralExpression(Undefined.Value),
-                        writable: true, deletable: this.context == CodeContext.Eval);
+                    this.AddVariable(variableName);
 
                     // The next token is either an equals sign (=), a semi-colon, a comma, or the "in" keyword.
                     if (this.nextToken == PunctuatorToken.Assignment)
@@ -689,17 +627,15 @@ namespace Jurassic.Compiler
                         this.Expect(PunctuatorToken.Assignment);
 
                         // Read the setter expression.
-                        declaration.InitExpression = ParseExpression(PunctuatorToken.Semicolon, PunctuatorToken.Comma);
+                        var setterExpression = ParseJSExpression(PunctuatorToken.Semicolon, PunctuatorToken.Comma);
 
-                        // Record the portion of the source document that will be highlighted when debugging.
-                        declaration.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+                        // Construct a new initialization expression that initializes the variable.
+                        initializationStatements.Add(new AssignmentJSExpression(variableName, setterExpression).ToExpression(
+                            this.executionContext.LexicalEnvironment));
 
                         // This is a regular for statement.
                         cannotBeForIn = true;
                     }
-
-                    // Add the declaration to the initialization statement.
-                    varStatement.Declarations.Add(declaration);
 
                     if (this.nextToken == PunctuatorToken.Semicolon)
                     {
@@ -709,24 +645,22 @@ namespace Jurassic.Compiler
                     else if (this.nextToken == KeywordToken.In && cannotBeForIn == false)
                     {
                         // This is a for-in statement.
-                        forInReference = new NameExpression(this.currentScope, declaration.VariableName);
+                        forInReference = new MemberJSExpression(variableName);
                         break;
                     }
                     else if (this.nextToken != PunctuatorToken.Comma)
-                        throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Unexpected token {0}", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
+                        throw new JavaScriptException("SyntaxError", string.Format("Unexpected token '{0}'", this.nextToken.Text), 1, "");
 
                     // Read past the comma token.
                     this.Expect(PunctuatorToken.Comma);
-
-                    // Keep track of the start of the statement so that source debugging works correctly.
-                    start = this.PositionAfterWhitespace;
 
                     // Multiple initializers are not allowed in for-in statements.
                     cannotBeForIn = true;
                 }
 
-                // Record the portion of the source document that will be highlighted when debugging.
-                varStatement.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+                // Create a block expression containing all the initialization statements.
+                if (forInReference == null)
+                    initializationExpression = ExpressionTreeHelpers.Block(initializationStatements);
             }
             else
             {
@@ -734,197 +668,225 @@ namespace Jurassic.Compiler
                 // The expression can be empty.
                 if (this.nextToken != PunctuatorToken.Semicolon)
                 {
-                    // Parse an expression.
-                    var initializationExpression = ParseExpression(PunctuatorToken.Semicolon, KeywordToken.In);
-
-                    // Record debug info for the expression.
-                    initializationStatement = new ExpressionStatement(initializationExpression);
-                    initializationStatement.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+                    var initializer = ParseJSExpression(PunctuatorToken.Semicolon, KeywordToken.In);
 
                     if (this.nextToken == KeywordToken.In)
                     {
                         // This is a for-in statement.
-                        if ((initializationExpression is IReferenceExpression) == false)
-                            throw new JavaScriptException(this.engine, "ReferenceError", "Invalid left-hand side in for-in", this.LineNumber, this.SourcePath);
-                        forInReference = (IReferenceExpression)initializationExpression;
+                        if ((initializer is MemberJSExpression) == false)
+                            throw new JavaScriptException("ReferenceError", "Invalid left-hand side in for-in", 1, "");
+                        forInReference = (MemberJSExpression)initializer;
+                    }
+                    else
+                    {
+                        // This is a regular for statement.
+                        initializationExpression = initializer.ToExpression(this.executionContext.LexicalEnvironment);
                     }
                 }
+                else
+                    // The initializer expression was empty.
+                    initializationExpression = Expression.Empty();
             }
+
+            // Set up the labels that will be jumped to if the break or continue statements are
+            // encountered.
+            this.statementContextStack.Loop("for");
 
             if (forInReference != null)
             {
                 // for (x in y)
                 // for (var x in y)
-                var result = new ForInStatement(this.labelsForCurrentStatement);
-                result.Variable = forInReference;
-                result.VariableSourceSpan = initializationStatement.SourceSpan;
                 
                 // Consume the "in".
                 this.Expect(KeywordToken.In);
 
                 // Parse the right-hand-side expression.
-                start = this.PositionAfterWhitespace;
-                result.TargetObject = ParseExpression(PunctuatorToken.RightParenthesis);
-                result.TargetObjectSourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+                var rightSideExpression = ParseExpression(PunctuatorToken.RightParenthesis);
 
                 // Read the right parenthesis.
                 this.Expect(PunctuatorToken.RightParenthesis);
 
                 // Read the statements that will be executed in the loop body.
-                result.Body = ParseStatement();
-
-                return result;
+                var statements = ParseStatement();
+                
+                // Construct a loop expression.
+                // var enumerator = TypeUtilities.EnumeratePropertyNames(rhs).GetEnumerator();
+                // while (true) {
+                //   continue-target:
+                //   if (enumerator.MoveNext() == false)
+                //     goto break-target;
+                //   lhs = enumerator.Current;
+                //
+                //   <body statements>
+                // }
+                // break-target:
+                var keys = Expression.Variable(typeof(IEnumerator<string>), "enumerator");
+                return
+                    Expression.Block(
+                        new ParameterExpression[] { keys },
+                        Expression.Assign(keys, Expression.Call(Expression.Call(ReflectionHelpers.TypeUtilities_EnumeratePropertyNames, Expression.Convert(rightSideExpression, typeof(object))), ReflectionHelpers.IEnumerable_GetEnumerator)),
+                        Expression.Loop(
+                            Expression.Block(
+                                Expression.IfThen(Expression.IsFalse(Expression.Call(keys, ReflectionHelpers.IEnumerator_MoveNext)), Expression.Break(this.CurrentStatement.BreakTarget)),
+                                forInReference.GetSetterExpression(this.executionContext.LexicalEnvironment, Expression.Call(keys, ReflectionHelpers.IEnumerator_Current)),
+                                statements
+                            ),
+                            this.CurrentStatement.BreakTarget, this.CurrentStatement.ContinueTarget));
             }
             else
             {
-                var result = new ForStatement(this.labelsForCurrentStatement);
-
-                // Set the initialization statement.
-                if (initializationStatement != null)
-                    result.InitStatement = initializationStatement;
-
                 // Read the semicolon.
                 this.Expect(PunctuatorToken.Semicolon);
 
                 // Parse the optional condition expression.
-                // Note: if the condition is omitted then it is considered to always be true.
-                if (this.nextToken != PunctuatorToken.Semicolon)
-                {
-                    start = this.PositionAfterWhitespace;
-                    result.ConditionStatement = new ExpressionStatement(ParseExpression(PunctuatorToken.Semicolon));
-                    result.ConditionStatement.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-                }
+                // Note: if the condition is omitted then it is considered to always be true. 
+                var condition = this.nextToken != PunctuatorToken.Semicolon ? ParseExpression(PunctuatorToken.Semicolon) : Expression.Constant(true);
 
                 // Read the semicolon.
                 // Note: automatic semicolon insertion never inserts a semicolon in the header of a
                 // for statement.
                 this.Expect(PunctuatorToken.Semicolon);
 
-                // Parse the optional increment expression.
-                if (this.nextToken != PunctuatorToken.RightParenthesis)
-                {
-                    start = this.PositionAfterWhitespace;
-                    result.IncrementStatement = new ExpressionStatement(ParseExpression(PunctuatorToken.RightParenthesis));
-                    result.IncrementStatement.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-                }
+                // Parse the optional update expression.
+                var update = this.nextToken != PunctuatorToken.RightParenthesis ? ParseExpression(PunctuatorToken.RightParenthesis) : Expression.Empty();
 
                 // Read the right parenthesis.
                 this.Expect(PunctuatorToken.RightParenthesis);
 
                 // Read the statements that will be executed in the loop body.
-                result.Body = ParseStatement();
+                var statements = ParseStatement();
 
-                return result;
+                // Construct a loop expression.
+                // <initializer>
+                // while (true) {
+                //   if (condition == false)
+                //     break;
+                //
+                //   <body statements>
+                //
+                //   continue-target:
+                //   <update expression>
+                // }
+                // break-target:
+                return
+                    Expression.Block(
+                        initializationExpression,
+                        Expression.Loop(
+                            Expression.Block(
+                                Expression.IfThen(Expression.IsFalse(ExpressionTreeHelpers.ToBoolean(condition)), Expression.Break(this.CurrentStatement.BreakTarget)),
+                                statements,
+                                Expression.Label(this.CurrentStatement.ContinueTarget),
+                                update
+                            ),
+                            this.CurrentStatement.BreakTarget));
             }
         }
 
         /// <summary>
         /// Parses a continue statement.
         /// </summary>
-        /// <returns> A continue statement. </returns>
-        private ContinueStatement ParseContinue()
+        /// <returns> An expression representing the continue statement. </returns>
+        public Expression ParseContinue()
         {
-            var result = new ContinueStatement(this.labelsForCurrentStatement);
-
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Consume the continue keyword.
             this.Expect(KeywordToken.Continue);
 
             // The continue statement can have an optional label to jump to.
+            string labelName = null;
             if (this.AtValidEndOfStatement() == false)
             {
                 // continue [label]
 
                 // Read the label name.
-                result.Label = this.ExpectIdentifier();
+                labelName = this.ExpectIdentifier();
             }
 
             // Consume the semi-colon, if there was one.
             this.ExpectEndOfStatement();
 
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+            // Make sure there is a valid continue target.
+            var continueTarget = this.statementContextStack.FindContinueTarget(labelName);
+            if (continueTarget == null)
+                throw new JavaScriptException("SyntaxError", "Invalid continue statement", this.LineNumber, this.SourcePath);
 
-            return result;
+            // Construct an expression to jump to the start of the nearest loop body.
+            return Expression.Continue(continueTarget);
         }
 
         /// <summary>
         /// Parses a break statement.
         /// </summary>
-        /// <returns> A break statement. </returns>
-        private BreakStatement ParseBreak()
+        /// <returns> An expression representing the break statement. </returns>
+        public Expression ParseBreak()
         {
-            var result = new BreakStatement(this.labelsForCurrentStatement);
-
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Consume the break keyword.
             this.Expect(KeywordToken.Break);
 
             // The break statement can have an optional label to jump to.
+            string labelName = null;
             if (this.AtValidEndOfStatement() == false)
             {
                 // break [label]
 
                 // Read the label name.
-                result.Label = this.ExpectIdentifier();
+                labelName = this.ExpectIdentifier();
             }
 
             // Consume the semi-colon, if there was one.
             this.ExpectEndOfStatement();
 
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+            // Make sure there is a valid break target.
+            var breakTarget = this.statementContextStack.FindBreakTarget(labelName);
+            if (breakTarget == null)
+                throw new JavaScriptException("SyntaxError", "Invalid break statement", this.LineNumber, this.SourcePath);
 
-            return result;
+            // Construct an expression to jump to the start of the nearest loop body.
+            return Expression.Break(breakTarget);
         }
 
         /// <summary>
         /// Parses a return statement.
         /// </summary>
-        /// <returns> A return statement. </returns>
-        private ReturnStatement ParseReturn()
+        /// <returns> An expression representing the return statement. </returns>
+        public Expression ParseReturn()
         {
-            if (this.context != CodeContext.Function)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Return statements are only allowed inside functions", this.LineNumber, this.SourcePath);
-
-            var result = new ReturnStatement(this.labelsForCurrentStatement);
-
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Consume the return keyword.
-            this.Expect(KeywordToken.Return);
+            Debug.Assert(this.nextToken == KeywordToken.Return);
+            this.Consume();
 
+            Expression returnValue = ExpressionTreeHelpers.Undefined();
             if (this.AtValidEndOfStatement() == false)
             {
                 // Parse the return value expression.
-                result.Value = ParseExpression(PunctuatorToken.Semicolon);
+                returnValue = ParseExpression(PunctuatorToken.Semicolon);
             }
 
             // Consume the end of the statement.
             this.ExpectEndOfStatement();
 
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-
-            return result;
+            if (this.executionContext.ScriptContext == ScriptContext.Function)
+            {
+                // Jump to the end of the function.
+                if (returnValue.Type != typeof(object))
+                    returnValue = Expression.Convert(returnValue, typeof(object));
+                return Expression.Return(this.executionContext.EndOfProgram, returnValue);
+            }
+            else
+            {
+                // Return is an error otherwise.
+                return ExpressionTreeHelpers.Throw("SyntaxError", "Illegal return statement");
+            }
         }
 
         /// <summary>
         /// Parses a with statement.
         /// </summary>
         /// <returns> An expression representing the with statement. </returns>
-        private WithStatement ParseWith()
+        public Expression ParseWith()
         {
             // This statement is not allowed in strict mode.
             if (this.StrictMode == true)
-                throw new JavaScriptException(this.engine, "SyntaxError", "The with statement is not supported in strict mode", this.LineNumber, this.SourcePath);
-
-            var result = new WithStatement(this.labelsForCurrentStatement);
+                throw new JavaScriptException("SyntaxError", "The with statement is not supported in strict mode", this.LineNumber, this.SourcePath);
 
             // Read past the "with" token.
             this.Expect(KeywordToken.With);
@@ -932,103 +894,122 @@ namespace Jurassic.Compiler
             // Read a left parenthesis token "(".
             this.Expect(PunctuatorToken.LeftParenthesis);
 
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Read an object reference.
-            var objectEnvironment = ParseExpression(PunctuatorToken.RightParenthesis);
-
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+            var expression = ParseExpression(PunctuatorToken.RightParenthesis);
 
             // Read a right parenthesis token ")".
             this.Expect(PunctuatorToken.RightParenthesis);
 
-            // Create a new scope and assign variables within the with statement to the scope.
-            result.Scope = ObjectScope.CreateWithScope(this.currentScope, objectEnvironment);
-            this.currentScope = result.Scope;
+            // We need to modify the lexical environment, then restore it afterwards.
+            var originalLexicalEnvironment = this.executionContext.LexicalEnvironment;
+            this.executionContext.LexicalEnvironment = Expression.Variable(typeof(LexicalScope), "withScope");
 
             // Read the body of the with statement.
-            result.Body = ParseStatement();
+            var body = ParseStatement();
 
-            // Revert the scope.
-            this.currentScope = this.currentScope.ParentScope;
+            // Initialize the dynamic part of the lexical environment.
+            body = Expression.Block(
+                new ParameterExpression[] { this.executionContext.LexicalEnvironment },
+                Expression.Assign(this.executionContext.LexicalEnvironment, Expression.New(
+                    ReflectionHelpers.LexicalScope_Constructor,
+                    originalLexicalEnvironment,
+                    ExpressionTreeHelpers.ToObject(expression),
+                    Expression.Constant(true))),
+                body);
 
-            return result;
+            // Restore the lexical environment.
+            this.executionContext.LexicalEnvironment = originalLexicalEnvironment;
+
+            return body;
         }
 
         /// <summary>
         /// Parses a switch statement.
         /// </summary>
-        /// <returns> A switch statement. </returns>
-        private SwitchStatement ParseSwitch()
+        /// <returns> An expression representing the switch statement. </returns>
+        public Expression ParseSwitch()
         {
-            var result = new SwitchStatement(this.labelsForCurrentStatement);
-
             // Consume the switch keyword.
-            this.Expect(KeywordToken.Switch);
+            Debug.Assert(this.nextToken == KeywordToken.Switch);
+            this.Consume();
 
             // Read the left parenthesis.
             this.Expect(PunctuatorToken.LeftParenthesis);
 
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Parse the switch expression.
-            result.Value = ParseExpression(PunctuatorToken.RightParenthesis);
-
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
+            var testExpression = ParseExpression(PunctuatorToken.RightParenthesis);
 
             // Read the right parenthesis.
             this.Expect(PunctuatorToken.RightParenthesis);
 
             // Consume the start brace ({).
-            this.Expect(PunctuatorToken.LeftBrace);
+            Debug.Assert(this.nextToken == PunctuatorToken.LeftBrace);
+            this.Consume();
+            
+            // Break statements need to jump to the end of the switch statement.
+            this.statementContextStack.Switch();
 
-            SwitchCase defaultClause = null;
+            // Read zero or more case statements.
+            var cases = new List<SwitchCase>();
+            Expression defaultCase = null;
+            Expression caseExpression = null;
+            List<Expression> caseStatements = null;
+            LabelTarget nextCaseLabel = null;
+
             while (true)
             {
+                // Construct a SwitchCase expression once we have finished reading the case statements.
+                if (caseStatements != null && (this.nextToken == KeywordToken.Case || this.nextToken == KeywordToken.Default || this.nextToken == PunctuatorToken.RightBrace))
+                {
+                    // Expression.Switch() requires that all case statements plus the default statement have the same type.
+                    // The jump to the next case block accomplishes this.
+                    caseStatements.Add(Expression.Goto(nextCaseLabel));
+
+                    if (caseExpression != null)
+                        cases.Add(Expression.SwitchCase(
+                            ExpressionTreeHelpers.Block(caseStatements),
+                            Expression.Convert(caseExpression, typeof(object))));
+                    else if (defaultCase == null)
+                        defaultCase = ExpressionTreeHelpers.Block(caseStatements);
+                    else
+                        throw new JavaScriptException("SyntaxError", "Only one default clause is allowed in a switch statement", this.LineNumber, this.SourcePath);
+                }
+
                 if (this.nextToken == KeywordToken.Case)
                 {
-                    var caseClause = new SwitchCase();
-
                     // Read the case keyword.
                     this.Expect(KeywordToken.Case);
 
                     // Parse the case expression.
-                    caseClause.Value = ParseExpression(PunctuatorToken.Colon);
+                    caseExpression = ParseExpression(PunctuatorToken.Colon);
 
                     // Consume the colon.
                     this.Expect(PunctuatorToken.Colon);
 
                     // Zero or more statements can be added to the case statement.
-                    while (this.nextToken != KeywordToken.Case && this.nextToken != KeywordToken.Default && this.nextToken != PunctuatorToken.RightBrace)
-                        caseClause.BodyStatements.Add(ParseStatement());
+                    caseStatements = new List<Expression>();
 
-                    // Add the case clause to the switch statement.
-                    result.CaseClauses.Add(caseClause);
+                    // Start with a label so fallthrough works.
+                    if (nextCaseLabel != null)
+                        caseStatements.Add(Expression.Label(nextCaseLabel));
+                    nextCaseLabel = Expression.Label("case-or-default-start");
                 }
                 else if (this.nextToken == KeywordToken.Default)
                 {
-                    // Make sure this is the only default clause.
-                    if (defaultClause != null)
-                        throw new JavaScriptException(this.engine, "SyntaxError", "Only one default clause is allowed.", this.LineNumber, this.SourcePath);
-
-                    defaultClause = new SwitchCase();
-
-                    // Read the case keyword.
+                    // Read the default keyword.
                     this.Expect(KeywordToken.Default);
 
                     // Consume the colon.
                     this.Expect(PunctuatorToken.Colon);
 
-                    // Zero or more statements can be added to the case statement.
-                    while (this.nextToken != KeywordToken.Case && this.nextToken != KeywordToken.Default && this.nextToken != PunctuatorToken.RightBrace)
-                        defaultClause.BodyStatements.Add(ParseStatement());
+                    // Zero or more statements can be added to the default statement.
+                    caseExpression = null;
+                    caseStatements = new List<Expression>();
 
-                    // Add the default clause to the switch statement.
-                    result.CaseClauses.Add(defaultClause);
+                    // Start with a label so fallthrough works.
+                    if (nextCaseLabel != null)
+                        caseStatements.Add(Expression.Label(nextCaseLabel));
+                    nextCaseLabel = Expression.Label("case-or-default-start");
                 }
                 else if (this.nextToken == PunctuatorToken.RightBrace)
                 {
@@ -1037,61 +1018,85 @@ namespace Jurassic.Compiler
                 else
                 {
                     // Statements cannot be added directly after the switch.
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Expected 'case' or 'default'.", this.LineNumber, this.SourcePath);
+                    if (caseStatements == null)
+                        throw new JavaScriptException("SyntaxError", "Expected 'case' or 'default'.", this.LineNumber, this.SourcePath);
+
+                    // Parse a single statement.
+                    caseStatements.Add(ParseStatement());
                 }
             }
 
             // Consume the end brace.
             this.Consume();
 
-            return result;
+            // Account for the special case when there are no case statements.
+            // Side-effects from the test expression must still be evaluated.
+            if (cases.Count == 0)
+            {
+                if (defaultCase == null)
+                    return testExpression;
+                return Expression.Block(
+                    testExpression,
+                    defaultCase,
+                    Expression.Label(nextCaseLabel),
+                    Expression.Label(this.CurrentStatement.BreakTarget));
+            }
+
+            // Construct a switch expression.
+            return Expression.Block(
+                Expression.Switch(
+                    Expression.Convert(testExpression, typeof(object)),
+                    defaultCase,
+                    ReflectionHelpers.TypeComparer_StrictEquals,
+                    cases),
+                Expression.Label(nextCaseLabel),
+                Expression.Label(this.CurrentStatement.BreakTarget));
         }
 
         /// <summary>
         /// Parses a throw statement.
         /// </summary>
-        /// <returns> A throw statement. </returns>
-        private ThrowStatement ParseThrow()
+        /// <returns> An expression representing the throw statement. </returns>
+        public Expression ParseThrow()
         {
-            var result = new ThrowStatement(this.labelsForCurrentStatement);
-
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
+            // Get the line number at the start of the throw statement.
+            int lineNumber = this.LineNumber;
 
             // Consume the throw keyword.
             this.Expect(KeywordToken.Throw);
 
             // A line terminator is not allowed here.
             if (this.consumedLineTerminator == true)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Illegal newline after throw", this.LineNumber, this.SourcePath);
+                throw new JavaScriptException("SyntaxError", "Illegal newline after throw", 1, "");
 
             // Parse the expression to throw.
-            result.Value = ParseExpression(PunctuatorToken.Semicolon);
+            var expression = ParseExpression(PunctuatorToken.Semicolon);
 
             // Consume the end of the statement.
             this.ExpectEndOfStatement();
 
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-
-            return result;
+            // Construct a throw expression.
+            return Expression.Throw(Expression.New(
+                ReflectionHelpers.JavaScriptException_Constructor3,
+                Expression.Convert(expression, typeof(object)),
+                Expression.Constant(this.LineNumber),
+                Expression.Constant(this.SourcePath)));
         }
 
         /// <summary>
         /// Parses a try statement.
         /// </summary>
-        /// <returns> A try-catch-finally statement. </returns>
-        private TryCatchFinallyStatement ParseTry()
+        /// <returns> An expression representing the try statement. </returns>
+        public Expression ParseTry()
         {
-            var result = new TryCatchFinallyStatement(this.labelsForCurrentStatement);
-
             // Consume the try keyword.
             this.Expect(KeywordToken.Try);
 
             // Parse the try block.
-            result.TryBlock = ParseBlock();
+            var tryBlock = Expression.Block(ParseBlock(), Expression.Empty());
 
             // The next token is either 'catch' or 'finally'.
+            CatchBlock[] catchBlockArray = null;
             if (this.nextToken == KeywordToken.Catch)
             {
                 // Consume the catch token.
@@ -1100,136 +1105,114 @@ namespace Jurassic.Compiler
                 // Read the left parenthesis.
                 this.Expect(PunctuatorToken.LeftParenthesis);
 
-                // Read the name of the variable to assign the exception to.
-                result.CatchVariableName = this.ExpectIdentifier();
-                this.ValidateVariableName(result.CatchVariableName);
+                // Read the identifier to assign the exception to.
+                var catchVariableName = this.ExpectIdentifier();
+                var catchVariable = Expression.Variable(typeof(JavaScriptException), catchVariableName);
+
+                // Check the variable name is valid.
+                this.ValidateVariableName(catchVariableName);
 
                 // Read the right parenthesis.
                 this.Expect(PunctuatorToken.RightParenthesis);
 
-                // Create a new scope for the catch variable.
-                this.currentScope = result.CatchScope = DeclarativeScope.CreateCatchScope(this.currentScope, result.CatchVariableName);
+                // We need to modify the lexical environment, then restore it afterwards.
+                var originalLexicalEnvironment = this.executionContext.LexicalEnvironment;
+                this.executionContext.LexicalEnvironment = Expression.Variable(typeof(LexicalScope), "catchScope");
 
-                // Parse the statements inside the catch block.
-                result.CatchBlock = ParseBlock();
+                // Parse the catch statements.
+                var catchBlock = ParseBlock();
 
-                // Revert the scope.
-                this.currentScope = this.currentScope.ParentScope;
+                // Initialize the dynamic part of the lexical environment.
+                catchBlock = Expression.Block(
+                    new ParameterExpression[] { this.executionContext.LexicalEnvironment },
+                    Expression.Assign(this.executionContext.LexicalEnvironment, Expression.New(
+                        ReflectionHelpers.LexicalScope_Constructor,
+                        originalLexicalEnvironment,
+                        Expression.Constant(null, typeof(ObjectInstance)),
+                        Expression.Constant(false))),
+                    Expression.Call(
+                        this.executionContext.LexicalEnvironment,
+                        ReflectionHelpers.IEnvironmentRecord_CreateMutableBinding,
+                        Expression.Constant(catchVariableName),
+                        Expression.Constant(true)),
+                    new MemberJSExpression(catchVariableName).GetSetterExpression(
+                        this.executionContext.LexicalEnvironment,
+                        Expression.Call(catchVariable, ReflectionHelpers.JavaScriptException_ErrorObject)), 
+                    catchBlock,
+                    Expression.Empty());
+
+                // Create a single catch block expression.
+                catchBlockArray = new CatchBlock[] {
+                    Expression.Catch(catchVariable, catchBlock)
+                };
+
+                // Restore the lexical environment.
+                this.executionContext.LexicalEnvironment = originalLexicalEnvironment;
             }
 
+            Expression finallyBlock = null;
             if (this.nextToken == KeywordToken.Finally)
             {
                 // Consume the finally token.
                 this.Expect(KeywordToken.Finally);
 
                 // Read the finally statements.
-                result.FinallyBlock = ParseBlock();
+                finallyBlock = Expression.Block(ParseBlock(), Expression.Empty());
             }
 
-            // There must be a catch or finally block.
-            if (result.CatchBlock == null && result.FinallyBlock == null)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Missing catch or finally after try", this.LineNumber, this.SourcePath);
-
-            return result;
+            // Construct a try-catch-finally expression.
+            return Expression.TryCatchFinally(
+                tryBlock,
+                finallyBlock,
+                catchBlockArray);
         }
 
         /// <summary>
         /// Parses a debugger statement.
         /// </summary>
-        /// <returns> A debugger statement. </returns>
-        private DebuggerStatement ParseDebugger()
+        /// <returns> An expression representing the debugger statement. </returns>
+        public Expression ParseDebugger()
         {
-            var result = new DebuggerStatement(this.labelsForCurrentStatement);
-
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
-
             // Consume the debugger keyword.
-            this.Expect(KeywordToken.Debugger);
+            Debug.Assert(this.nextToken == KeywordToken.Debugger);
+            this.Consume();
 
             // Consume the end of the statement.
             this.ExpectEndOfStatement();
 
-            // Record the portion of the source document that will be highlighted when debugging.
-            result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-
-            return result;
+            // Construct a debugger expression.
+            return Expression.Call(ReflectionHelpers.Debugger_Break);
         }
 
         /// <summary>
-        /// Parses a function declaration.
+        /// Parses a function.
         /// </summary>
-        /// <returns> A statement representing the function. </returns>
-        private Statement ParseFunctionDeclaration()
+        /// <param name="insideExpression"> <c>true</c> if this is a function expression; <c>false</c> if
+        /// it is a function declaration. </param>
+        /// <returns> An expression representing the function. </returns>
+        public Expression ParseFunction(bool insideExpression = false)
         {
-            // Parse the function declaration.
-            var expression = ParseFunction(FunctionType.Declaration, this.initialScope);
+            // Consume the function keyword.
+            Debug.Assert(this.nextToken == KeywordToken.Function);
+            this.Consume();
 
-            // Add the function to the top-level scope.
-            this.initialScope.DeclareVariable(expression.FunctionName, expression, writable: true, deletable: this.context == CodeContext.Eval);
-
-            // Function declarations do nothing at the point of declaration - everything happens
-            // at the top of the function/global code.
-            return new EmptyStatement(this.labelsForCurrentStatement);
-        }
-
-        private enum FunctionType
-        {
-            Declaration,
-            Expression,
-            Getter,
-            Setter,
-        }
-
-        /// <summary>
-        /// Parses a function declaration or a function expression.
-        /// </summary>
-        /// <param name="functionType"> The type of function to parse. </param>
-        /// <param name="parentScope"> The parent scope for the function. </param>
-        /// <returns> A function expression. </returns>
-        private FunctionExpression ParseFunction(FunctionType functionType, Scope parentScope)
-        {
-            if (functionType != FunctionType.Getter && functionType != FunctionType.Setter)
-            {
-                // Consume the function keyword.
-                this.Expect(KeywordToken.Function);
-            }
-
-            // Read the function name.
+            // Optionally read the function name.
             var functionName = string.Empty;
-            if (functionType == FunctionType.Declaration)
-            {
-                functionName = this.ExpectIdentifier();
-            }
-            else if (functionType == FunctionType.Expression)
+            if (insideExpression == false || this.nextToken is IdentifierToken)
             {
                 // The function name is optional for function expressions.
-                if (this.nextToken is IdentifierToken)
-                    functionName = this.ExpectIdentifier();
+                functionName = this.ExpectIdentifier();
             }
-            else if (functionType == FunctionType.Getter || functionType == FunctionType.Setter)
-            {
-                // Getters and setters can have any name that is allowed of a property.
-                bool wasIdentifier;
-                functionName = ReadPropertyName(out wasIdentifier);
-            }
-            else
-                throw new ArgumentOutOfRangeException("functionType");
-            ValidateVariableName(functionName);
 
             // Read the left parenthesis.
             this.Expect(PunctuatorToken.LeftParenthesis);
 
-            // Read zero or more argument names.
-            var argumentNames = new List<string>();
+            // Read zero or more parameter names.
+            var parameterNames = new List<string>();
 
-            // Read the first argument name.
+            // Read the first parameter name.
             if (this.nextToken != PunctuatorToken.RightParenthesis)
-            {
-                var argumentName = this.ExpectIdentifier();
-                ValidateVariableName(argumentName);
-                argumentNames.Add(argumentName);
-            }
+                parameterNames.Add(this.ExpectIdentifier());
 
             while (true)
             {
@@ -1238,128 +1221,128 @@ namespace Jurassic.Compiler
                     // Consume the comma.
                     this.Consume();
 
-                    // Read and validate the argument name.
-                    var argumentName = this.ExpectIdentifier();
-                    ValidateVariableName(argumentName);
-                    argumentNames.Add(argumentName);
+                    // Read the parameter name.
+                    parameterNames.Add(this.ExpectIdentifier());
                 }
                 else if (this.nextToken == PunctuatorToken.RightParenthesis)
                     break;
                 else
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Expected ',' or ')'", this.LineNumber, this.SourcePath);
+                    throw new JavaScriptException("SyntaxError", "Expected ',' or ')'", 1, "1");
             }
-
-            // Getters must have zero arguments.
-            if (functionType == FunctionType.Getter && argumentNames.Count != 0)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Getters cannot have arguments", this.LineNumber, this.SourcePath);
-
-            // Setters must have one argument.
-            if (functionType == FunctionType.Setter && argumentNames.Count != 1)
-                throw new JavaScriptException(this.engine, "SyntaxError", "Setters must have a single argument", this.LineNumber, this.SourcePath);
 
             // Read the right parenthesis.
             this.Expect(PunctuatorToken.RightParenthesis);
 
-            // Record the start of the function body.
-            var startPosition = this.PositionBeforeWhitespace;
-
-            // Since the parser reads one token in advance, start capturing the function body here.
-            var bodyTextBuilder = new System.Text.StringBuilder();
-            var originalBodyTextBuilder = this.lexer.InputCaptureStringBuilder;
-            this.lexer.InputCaptureStringBuilder = bodyTextBuilder;
+            // Create a new execution context.
+            var originalContext = this.executionContext;
+            this.executionContext = new FunctionContext(this, ScriptContext.Function);
 
             // Read the start brace.
             this.Expect(PunctuatorToken.LeftBrace);
 
-            // This context has a nested function.
-            this.methodOptimizationHints.HasNestedFunction = true;
-
-            // Create a new scope and assign variables within the function body to the scope.
-            bool includeNameInScope = functionType != FunctionType.Getter && functionType != FunctionType.Setter;
-            var scope = DeclarativeScope.CreateFunctionScope(parentScope, includeNameInScope ? functionName : string.Empty, argumentNames);
-
             // Read the function body.
-            var functionParser = Parser.CreateFunctionBodyParser(this, scope);
-            var body = functionParser.Parse();
+            var body = Parse();
 
-            // Transfer state back from the function parser.
-            this.nextToken = functionParser.nextToken;
-            this.lexer.StrictMode = this.StrictMode;
-            this.lexer.InputCaptureStringBuilder = originalBodyTextBuilder;
-            if (originalBodyTextBuilder != null)
-                originalBodyTextBuilder.Append(bodyTextBuilder);
-
-            SourceCodePosition endPosition;
-            if (functionType == FunctionType.Expression)
+            // Read the end brace.
+            if (insideExpression == true)
             {
                 // The end token '}' will be consumed by the parent function.
                 if (this.nextToken != PunctuatorToken.RightBrace)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Expected '}'", this.LineNumber, this.SourcePath);
+                    throw new JavaScriptException("SyntaxError", "Expected '}'", this.LineNumber, this.SourcePath);
+            }
+            else
+                this.Expect(PunctuatorToken.RightBrace);
 
-                // Record the end of the function body.
-                endPosition = new SourceCodePosition(this.PositionAfterWhitespace.Line, this.PositionAfterWhitespace.Column + 1);
+            // Compile the expression tree.
+            Func<LexicalScope, object> compiledBody = Compile(body, functionName);
+
+            // Restore the original context.
+            this.executionContext = originalContext;
+
+            // Construct an expression that creates the delegate that we need to pass to the UserDefinedFunction constructor.
+            Expression delegateExpression;
+            if (this.EnableDebugging == true)
+            {
+                delegateExpression = Expression.Convert(Expression.Call(ReflectionHelpers.Delegate_CreateDelegate,
+                    Expression.Constant(typeof(Func<LexicalScope, object>), typeof(Type)),
+                    Expression.Constant(compiledBody.Method, typeof(System.Reflection.MethodInfo))), typeof(Func<LexicalScope, object>));
             }
             else
             {
-                // Consume the '}'.
-                this.Expect(PunctuatorToken.RightBrace);
-
-                // Record the end of the function body.
-                endPosition = new SourceCodePosition(this.PositionAfterWhitespace.Line, this.PositionAfterWhitespace.Column + 1);
+                delegateExpression = Expression.Constant(compiledBody);
             }
 
-            // Create a new function expression.
-            var options = this.options.Clone();
-            options.ForceStrictMode = functionParser.StrictMode;
-            var context = new FunctionMethodGenerator(this.engine, scope, functionName,
-                includeNameInScope, argumentNames,
-                bodyTextBuilder.ToString(0, bodyTextBuilder.Length - 1), body,
-                this.SourcePath, options);
-            context.MethodOptimizationHints = functionParser.methodOptimizationHints;
-            return new FunctionExpression(context);
+            // Construct an expression that creates a new UserDefinedFunction.
+            var newFunctionExpression = Expression.New(ReflectionHelpers.UserDefinedFunction_Constructor,
+                Expression.Call(Expression.Call(ReflectionHelpers.Global_Function), ReflectionHelpers.FunctionInstance_InstancePrototype),
+                Expression.Constant(functionName),
+                Expression.NewArrayInit(typeof(string), parameterNames.ConvertAll(name => Expression.Constant(name))),
+                insideExpression == true ? this.executionContext.LexicalEnvironment : this.executionContext.VariableEnvironment,
+                delegateExpression);
+
+            // If this is a function expression, return the UserDefinedFunction.
+            if (insideExpression == true)
+                return newFunctionExpression;
+
+            // Otherwise, add the function to the scope.
+            this.AddVariable(functionName, newFunctionExpression);
+
+            // Function declarations do nothing at the point of declaration - everything happens
+            // at the top of the function/global code.
+            return Expression.Empty();
         }
 
         /// <summary>
         /// Parses a statement consisting of an expression or starting with a label.  These two
         /// cases are disambiguated here.
         /// </summary>
-        /// <returns> A statement. </returns>
-        private Statement ParseLabelOrExpressionStatement()
+        /// <returns> An expression representing the statement. </returns>
+        private Expression ParseLabelOrExpressionStatement()
         {
-            // Keep track of the start of the statement so that source debugging works correctly.
-            var start = this.PositionAfterWhitespace;
+            Expression result;
 
             // Parse the statement as though it was an expression - but stop if there is an unexpected colon.
-            var expression = ParseExpression(PunctuatorToken.Semicolon, PunctuatorToken.Colon);
+            var expr = ParseJSExpression(PunctuatorToken.Semicolon, PunctuatorToken.Colon);
 
-            if (this.nextToken == PunctuatorToken.Colon && expression is NameExpression)
+            if (this.nextToken == PunctuatorToken.Colon && expr is MemberJSExpression && ((MemberJSExpression)expr).Base == null)
             {
                 // The expression is actually a label.
 
                 // Extract the label name.
-                var labelName = ((NameExpression)expression).Name;
-                this.labelsForCurrentStatement.Add(labelName);
+                this.statementContextStack.Label(((LiteralJSExpression)((MemberJSExpression)expr).Name).Value.ToString());
 
                 // Read past the colon.
                 this.Expect(PunctuatorToken.Colon);
 
                 // Read the rest of the statement.
-                return ParseStatementNoNewContext();
+                result = ParseStatementNoNewContext();
+
+                // Define a label at the end of the statement, but only if the statement wasn't a
+                // loop or switch statement (these statements already have a label at the end.
+                if (this.CurrentStatement.IsLoopOrSwitchStatement == false)
+                    result = Expression.Block(
+                        result,
+                        Expression.Label(this.CurrentStatement.BreakTarget));
             }
             else
             {
+                // Convert the expression into a usable form.
+                result = expr.ToExpression(this.executionContext.LexicalEnvironment);
+
+                // If this is global or eval code (i.e. not in a function) then store the result of
+                // the expression in a variable so it can be used as the return value for the
+                // program.
+                if (this.executionContext.ScriptContext != ScriptContext.Function)
+                {
+                    if (result.Type != typeof(object))
+                        result = Expression.Convert(result, typeof(object));
+                    result = Expression.Assign(this.executionContext.ReturnValue, result);
+                }
 
                 // Consume the end of the statement.
                 this.ExpectEndOfStatement();
-
-                // Create a new expression statement.
-                var result = new ExpressionStatement(this.labelsForCurrentStatement, expression);
-
-                // Record the portion of the source document that will be highlighted when debugging.
-                result.SourceSpan = new SourceCodeSpan(start, this.PositionBeforeWhitespace);
-
-                return result;
             }
+            return result;
         }
 
 
@@ -1388,27 +1371,6 @@ namespace Jurassic.Compiler
         private static Dictionary<OperatorKey, Operator> operatorLookup;
 
         /// <summary>
-        /// Initializes the token -> operator mapping dictionary.
-        /// </summary>
-        /// <returns> The token -> operator mapping dictionary. </returns>
-        private static Dictionary<OperatorKey, Operator> InitializeOperatorLookup()
-        {
-            var result = new Dictionary<OperatorKey, Operator>(55);
-            foreach (var @operator in Operator.AllOperators)
-            {
-                result.Add(new OperatorKey() { Token = @operator.Token, PostfixOrInfix = @operator.HasLHSOperand }, @operator);
-                if (@operator.SecondaryToken != null)
-                {
-                    // Note: the secondary token for the grouping operator and function call operator ')' is a duplicate.
-                    result[new OperatorKey() { Token = @operator.SecondaryToken, PostfixOrInfix = @operator.HasRHSOperand }] = @operator;
-                    if (@operator.InnerOperandIsOptional == true)
-                        result[new OperatorKey() { Token = @operator.SecondaryToken, PostfixOrInfix = false }] = @operator;
-                }
-            }
-            return result;
-        }
-
-        /// <summary>
         /// Finds a operator given a token and an indication whether the prefix or infix/postfix
         /// version is desired.
         /// </summary>
@@ -1418,14 +1380,23 @@ namespace Jurassic.Compiler
         /// <returns> An Operator instance, or <c>null</c> if the operator could not be found. </returns>
         private static Operator OperatorFromToken(Token token, bool postfixOrInfix)
         {
-            Operator result;
             if (operatorLookup == null)
             {
-                // Initialize the operator lookup table.
-                var temp = InitializeOperatorLookup();
-                System.Threading.Thread.MemoryBarrier();
-                operatorLookup = temp;
+                operatorLookup = new Dictionary<OperatorKey, Operator>(55);
+                foreach (var @operator in Operator.AllOperators)
+                {
+                    operatorLookup.Add(new OperatorKey() { Token = @operator.Token, PostfixOrInfix = @operator.HasLHSOperand }, @operator);
+                    if (@operator.SecondaryToken != null)
+                    {
+                        // Note: the secondary token for the grouping operator and function call operator ')' is a duplicate.
+                        operatorLookup[new OperatorKey() { Token = @operator.SecondaryToken, PostfixOrInfix = @operator.HasRHSOperand }] = @operator;
+                        if (@operator.InnerOperandIsOptional == true)
+                            operatorLookup[new OperatorKey() { Token = @operator.SecondaryToken, PostfixOrInfix = false }] = @operator;
+                    }
+                }
             }
+
+            Operator result;
             if (operatorLookup.TryGetValue(new OperatorKey() { Token = token, PostfixOrInfix = postfixOrInfix }, out result) == false)
                 return null;
             return result;
@@ -1436,66 +1407,55 @@ namespace Jurassic.Compiler
         /// </summary>
         /// <param name="endToken"> A token that indicates the end of the expression. </param>
         /// <returns> An expression tree that represents the expression. </returns>
-        private Expression ParseExpression(params Token[] endTokens)
+        public Expression ParseExpression(params Token[] endTokens)
+        {
+            return ParseJSExpression(endTokens).ToExpression(this.executionContext.LexicalEnvironment);
+        }
+
+        /// <summary>
+        /// Parses a javascript expression.
+        /// </summary>
+        /// <param name="endToken"> A token that indicates the end of the expression. </param>
+        /// <returns> An expression tree that represents the expression. </returns>
+        public JSExpression ParseJSExpression(params Token[] endTokens)
         {
             // The root of the expression tree.
-            Expression root = null;
+            JSExpression root = null;
 
             // The active operator, i.e. the one last encountered.
-            OperatorExpression unboundOperator = null;
+            OperatorJSExpression unboundOperator = null;
+
+            // Literals are always valid at the start of an expression.
+            this.context = ParserContext.LiteralContext;
 
             while (this.nextToken != null)
             {
-                if (this.nextToken is LiteralToken ||
-                    this.nextToken is IdentifierToken ||
-                    this.nextToken == KeywordToken.Function ||
-                    this.nextToken == KeywordToken.This ||
+                if (this.nextToken is LiteralToken || this.nextToken is IdentifierToken ||
+                    this.nextToken == KeywordToken.Function || this.nextToken == KeywordToken.This ||
                     this.nextToken == PunctuatorToken.LeftBrace ||
-                    (this.nextToken == PunctuatorToken.LeftBracket && this.expressionState == ParserExpressionState.Literal) ||
-                    (this.nextToken is KeywordToken && unboundOperator != null && unboundOperator.OperatorType == OperatorType.MemberAccess && this.expressionState == ParserExpressionState.Literal))
+                    (this.context == ParserContext.LiteralContext && this.nextToken == PunctuatorToken.LeftBracket))
                 {
                     // If a literal was found where an operator was expected, insert a semi-colon
                     // automatically (if this would fix the error and a line terminator was
                     // encountered) or throw an error.
-                    if (this.expressionState != ParserExpressionState.Literal)
+                    if (this.context != ParserContext.LiteralContext)
                     {
                         // Check for automatic semi-colon insertion.
                         if (Array.IndexOf(endTokens, PunctuatorToken.Semicolon) >= 0 && this.consumedLineTerminator == true)
                             break;
-                        throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected operator but found {0}", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
+                        throw new JavaScriptException("SyntaxError", "Unexpected variable or literal.", this.LineNumber, this.SourcePath);
                     }
 
-                    // New in ECMAScript 5 is the ability to use keywords as property names.
-                    if ((this.nextToken is KeywordToken || (this.nextToken is LiteralToken && ((LiteralToken)this.nextToken).IsKeyword == true)) &&
-                        unboundOperator != null &&
-                        unboundOperator.OperatorType == OperatorType.MemberAccess &&
-                        this.expressionState == ParserExpressionState.Literal)
-                    {
-                        this.nextToken = new IdentifierToken(this.nextToken.Text);
-                    }
-
-                    Expression terminal;
+                    JSExpression terminal;
                     if (this.nextToken is LiteralToken)
-                        // If the token is a literal, convert it to a literal expression.
-                        terminal = new LiteralExpression(((LiteralToken)this.nextToken).Value);
+                        // If the token is a literal, convert it to a constant.
+                        terminal = new LiteralJSExpression(((LiteralToken)this.nextToken).Value);
                     else if (this.nextToken is IdentifierToken)
-                    {
-                        // If the token is an identifier, convert it to a NameExpression.
-                        var identifierName = ((IdentifierToken)this.nextToken).Name;
-                        terminal = new NameExpression(this.currentScope, identifierName);
-
-                        // Record each occurance of a variable name.
-                        if (unboundOperator == null || unboundOperator.OperatorType != OperatorType.MemberAccess)
-                            this.methodOptimizationHints.EncounteredVariable(identifierName);
-                    }
+                        // If the token is an identifier, convert it to a member access expression.
+                        terminal = new MemberJSExpression(((IdentifierToken)this.nextToken).Name);
                     else if (this.nextToken == KeywordToken.This)
-                    {
-                        // Convert "this" to an expression.
-                        terminal = new ThisExpression();
-
-                        // Add method optimization info.
-                        this.methodOptimizationHints.HasThis = true;
-                    }
+                        // Treat the "this" keyword like an identifier.
+                        terminal = new MemberJSExpression("this");
                     else if (this.nextToken == PunctuatorToken.LeftBracket)
                         // Array literal.
                         terminal = ParseArrayLiteral();
@@ -1523,7 +1483,7 @@ namespace Jurassic.Compiler
                 else if (this.nextToken is PunctuatorToken || this.nextToken is KeywordToken)
                 {
                     // The token is an operator (o1).
-                    Operator newOperator = OperatorFromToken(this.nextToken, postfixOrInfix: this.expressionState == ParserExpressionState.Operator);
+                    Operator newOperator = OperatorFromToken(this.nextToken, postfixOrInfix: this.context == ParserContext.OperatorContext);
 
                     // Make sure the token is actually an operator and not just a random keyword.
                     if (newOperator == null)
@@ -1534,13 +1494,8 @@ namespace Jurassic.Compiler
                         // Check for automatic semi-colon insertion.
                         if (Array.IndexOf(endTokens, PunctuatorToken.Semicolon) >= 0 && (this.consumedLineTerminator == true || this.nextToken == PunctuatorToken.RightBrace))
                             break;
-                        throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Unexpected token {0} in expression.", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
+                        throw new JavaScriptException("SyntaxError", string.Format("Unexpected token '{0}' in expression.", this.nextToken.Text), this.LineNumber, this.SourcePath);
                     }
-
-                    // Post-fix increment and decrement cannot have a line terminator in between
-                    // the operator and the operand.
-                    if (this.consumedLineTerminator == true && (newOperator == Operator.PostIncrement || newOperator == Operator.PostDecrement))
-                        break;
 
                     // There are four possibilities:
                     // 1. The token is the second of a two-part operator (for example, the ':' in a
@@ -1550,8 +1505,8 @@ namespace Jurassic.Compiler
                     {
                         // Traverse down the tree looking for the parent operator that corresponds to
                         // this token.
-                        OperatorExpression parentExpression = null;
-                        var node = root as OperatorExpression;
+                        OperatorJSExpression parentExpression = null;
+                        var node = root as OperatorJSExpression;
                         while (node != null)
                         {
                             if (node.Operator.Token == newOperator.Token && node.SecondTokenEncountered == false)
@@ -1572,7 +1527,7 @@ namespace Jurassic.Compiler
                             // Check for automatic semi-colon insertion.
                             if (Array.IndexOf(endTokens, PunctuatorToken.Semicolon) >= 0 && this.consumedLineTerminator == true)
                                 break;
-                            throw new JavaScriptException(this.engine, "SyntaxError", "Mismatched closing token in expression.", this.LineNumber, this.SourcePath);
+                            throw new JavaScriptException("SyntaxError", "Mismatched closing token in expression.", this.LineNumber, this.SourcePath);
                         }
 
                         // Mark that we have seen the closing token.
@@ -1590,7 +1545,7 @@ namespace Jurassic.Compiler
                             // indicate the start of a new variable clause because it is inside the
                             // function call operator.
                             bool insideOperator = false;
-                            var node = root as OperatorExpression;
+                            var node = root as OperatorJSExpression;
                             while (node != null)
                             {
                                 if (node.Operator.SecondaryToken != null && node.SecondTokenEncountered == false)
@@ -1604,7 +1559,7 @@ namespace Jurassic.Compiler
                         }
 
                         // All the other situations involve the creation of a new operator.
-                        var newExpression = OperatorExpression.FromOperator(newOperator);
+                        var newExpression = OperatorJSExpression.FromOperator(newOperator);
 
                         // 2. The new operator is a prefix operator.  The new operator becomes an operand
                         //    of the previous operator.
@@ -1624,7 +1579,7 @@ namespace Jurassic.Compiler
                                 // Check for automatic semi-colon insertion.
                                 if (Array.IndexOf(endTokens, PunctuatorToken.Semicolon) >= 0 && this.consumedLineTerminator == true)
                                     break;
-                                throw new JavaScriptException(this.engine, "SyntaxError", "Invalid use of prefix operator.", this.LineNumber, this.SourcePath);
+                                throw new JavaScriptException("SyntaxError", "Invalid use of prefix operator.", this.LineNumber, this.SourcePath);
                             }
                         }
                         else
@@ -1632,7 +1587,7 @@ namespace Jurassic.Compiler
                             // Search up the tree for an operator that has a lower precedence.
                             // Because we don't store the parent link, we have to traverse down the
                             // tree and take the last one we find instead.
-                            OperatorExpression lowPrecedenceOperator = null;
+                            OperatorJSExpression lowPrecedenceOperator = null;
                             if (unboundOperator == null ||
                                 (newOperator.Associativity == OperatorAssociativity.LeftToRight && unboundOperator.Precedence < newOperator.Precedence) ||
                                 (newOperator.Associativity == OperatorAssociativity.RightToLeft && unboundOperator.Precedence <= newOperator.Precedence))
@@ -1643,7 +1598,7 @@ namespace Jurassic.Compiler
                             else
                             {
                                 // Search for a lower precedence operator by traversing the tree.
-                                var node = root as OperatorExpression;
+                                var node = root as OperatorJSExpression;
                                 while (node != null && node != unboundOperator)
                                 {
                                     if ((newOperator.Associativity == OperatorAssociativity.LeftToRight && node.Precedence < newOperator.Precedence) ||
@@ -1673,7 +1628,7 @@ namespace Jurassic.Compiler
                                     // Check for automatic semi-colon insertion.
                                     if (Array.IndexOf(endTokens, PunctuatorToken.Semicolon) >= 0 && this.consumedLineTerminator == true)
                                         break;
-                                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid use of prefix operator.", this.LineNumber, this.SourcePath);
+                                    throw new JavaScriptException("SyntaxError", "Invalid use of prefix operator.", this.LineNumber, this.SourcePath);
                                 }
                                 newExpression.Push(lowPrecedenceOperator.Pop());
                                 lowPrecedenceOperator.Push(newExpression);
@@ -1685,72 +1640,32 @@ namespace Jurassic.Compiler
                 }
                 else
                 {
-                    throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Unexpected token {0} in expression", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
+                    throw new JavaScriptException("SyntaxError", string.Format("Unexpected token '{0}' in expression", this.nextToken.Text), this.LineNumber, this.SourcePath);
                 }
 
                 // Read the next token.
-                this.Consume(root != null && (unboundOperator == null || unboundOperator.AcceptingOperands == false) ? ParserExpressionState.Operator : ParserExpressionState.Literal);
+                this.Consume(root != null && (unboundOperator == null || unboundOperator.AcceptingOperands == false) ? ParserContext.OperatorContext : ParserContext.LiteralContext);
             }
 
             // Empty expressions are invalid.
             if (root == null)
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected an expression but found {0} instead", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
-
-            // Check the AST is valid.
-            CheckASTValidity(root);
-
-            // A literal is the next valid expression token.
-            this.expressionState = ParserExpressionState.Literal;
-            this.lexer.ParserExpressionState = expressionState;
+                throw new JavaScriptException("SyntaxError", "Expected an expression", this.LineNumber, this.SourcePath);
 
             // Resolve all the unbound operators into real operators.
             return root;
         }
 
         /// <summary>
-        /// Checks the given AST is valid.
-        /// </summary>
-        /// <param name="root"> The root of the AST. </param>
-        private void CheckASTValidity(Expression root)
-        {
-            // Push the root expression onto a stack.
-            Stack<Expression> stack = new Stack<Expression>();
-            stack.Push(root);
-
-            while (stack.Count > 0)
-            {
-                // Pop the next expression from the stack.
-                var expression = stack.Pop() as OperatorExpression;
-                
-                // Only operator expressions are checked for validity.
-                if (expression == null)
-                    continue;
-
-                // Check the operator expression has the right number of operands.
-                if (expression.Operator.IsValidNumberOfOperands(expression.OperandCount) == false)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Wrong number of operands", this.LineNumber, this.SourcePath);
-
-                // Check the operator expression is closed.
-                if (expression.Operator.SecondaryToken != null && expression.SecondTokenEncountered == false)
-                    throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Missing closing token '{0}'", expression.Operator.SecondaryToken.Text), this.LineNumber, this.SourcePath);
-
-                // Check the child nodes.
-                for (int i = 0; i < expression.OperandCount; i++)
-                    stack.Push(expression.GetRawOperand(i));
-            }
-        }
-
-        /// <summary>
         /// Parses an array literal (e.g. "[1, 2]").
         /// </summary>
         /// <returns> A literal expression that represents the array literal. </returns>
-        private LiteralExpression ParseArrayLiteral()
+        private LiteralJSExpression ParseArrayLiteral()
         {
             // Read past the initial '[' token.
             Debug.Assert(this.nextToken == PunctuatorToken.LeftBracket);
             this.Consume();
 
-            var items = new List<Expression>();
+            var items = new List<JSExpression>();
             while (true)
             {
                 // If the next token is ']', then the array literal is complete.
@@ -1759,10 +1674,10 @@ namespace Jurassic.Compiler
 
                 // If the next token is ',', then the array element is undefined.
                 if (this.nextToken == PunctuatorToken.Comma)
-                    items.Add(null);
+                    items.Add(new LiteralJSExpression(null));
                 else
                     // Otherwise, read the next item in the array.
-                    items.Add(ParseExpression(PunctuatorToken.Comma, PunctuatorToken.RightBracket));
+                    items.Add(ParseJSExpression(PunctuatorToken.Comma, PunctuatorToken.RightBracket));
 
                 // Read past the comma.
                 Debug.Assert(this.nextToken == PunctuatorToken.Comma || this.nextToken == PunctuatorToken.RightBracket);
@@ -1773,29 +1688,20 @@ namespace Jurassic.Compiler
             // The end token ']' will be consumed by the parent function.
             Debug.Assert(this.nextToken == PunctuatorToken.RightBracket);
 
-            return new LiteralExpression(items);
-        }
-
-        /// <summary>
-        /// Used to store the getter and setter for an object literal property.
-        /// </summary>
-        internal class ObjectLiteralAccessor
-        {
-            public FunctionExpression Getter;
-            public FunctionExpression Setter;
+            return new LiteralJSExpression(items.ToArray());
         }
 
         /// <summary>
         /// Parses an object literal (e.g. "{a: 5}").
         /// </summary>
         /// <returns> A literal expression that represents the object literal. </returns>
-        private LiteralExpression ParseObjectLiteral()
+        private LiteralJSExpression ParseObjectLiteral()
         {
             // Read past the initial '{' token.
             Debug.Assert(this.nextToken == PunctuatorToken.LeftBrace);
             this.Consume();
 
-            var properties = new Dictionary<string, object>();
+            var properties = new Dictionary<string, JSExpression>();
             while (true)
             {
                 // If the next token is '}', then the object literal is complete.
@@ -1803,80 +1709,39 @@ namespace Jurassic.Compiler
                     break;
 
                 // Read the next property name.
-                bool mightBeGetOrSet;
-                string propertyName = ReadPropertyName(out mightBeGetOrSet);
-
-                // Check if this is a getter or setter.
-                Expression propertyValue;
-                if (this.nextToken != PunctuatorToken.Colon && mightBeGetOrSet == true && (propertyName == "get" || propertyName == "set"))
+                string propertyName;
+                if (this.nextToken is LiteralToken)
                 {
-                    // Parse the function name and body.
-                    var function = ParseFunction(propertyName == "get" ? FunctionType.Getter : FunctionType.Setter, this.currentScope);
-
-                    // Get the function name.
-                    var getOrSet = propertyName;
-                    propertyName = function.FunctionName;
-
-                    if (getOrSet == "get")
-                    {
-                        // This is a getter property.
-                        object existingValue;
-                        if (properties.TryGetValue(propertyName, out existingValue) == false)
-                            // The property has not been seen before.
-                            properties.Add(propertyName, new ObjectLiteralAccessor() { Getter = function });
-                        else
-                        {
-                            // Add to the existing property.
-                            var existingAccessor = existingValue as ObjectLiteralAccessor;
-                            if (existingAccessor == null)
-                                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("The property '{0}' cannot have both a data property and a getter", propertyName), this.LineNumber, this.SourcePath);
-                            if (existingAccessor.Getter != null)
-                                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("The property '{0}' cannot have multiple getters", propertyName), this.LineNumber, this.SourcePath);
-                            existingAccessor.Getter = function;
-                        }
-                    }
-                    else
-                    {
-                        // This is a setter property.
-                        object existingValue;
-                        if (properties.TryGetValue(propertyName, out existingValue) == false)
-                            // The property has not been seen before.
-                            properties.Add(propertyName, new ObjectLiteralAccessor() { Setter = function });
-                        else
-                        {
-                            // Add to the existing property.
-                            var existingAccessor = existingValue as ObjectLiteralAccessor;
-                            if (existingAccessor == null)
-                                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("The property '{0}' cannot have both a data property and a setter", propertyName), this.LineNumber, this.SourcePath);
-                            if (existingAccessor.Setter != null)
-                                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("The property '{0}' cannot have multiple setters", propertyName), this.LineNumber, this.SourcePath);
-                            existingAccessor.Setter = function;
-                        }
-                    }
+                    // The property name can be a string or a number.
+                    object literalValue = ((LiteralToken)this.nextToken).Value;
+                    if ((literalValue is string || literalValue is double) == false)
+                        throw new JavaScriptException("SyntaxError", "Expected property name", 1, "");
+                    propertyName = ((LiteralToken)this.nextToken).Value.ToString();
+                }
+                else if (this.nextToken is IdentifierToken)
+                {
+                    // An identifier is also okay.
+                    propertyName = ((IdentifierToken)this.nextToken).Name;
+                 
+                    // Check the property name is valid.
+                    ValidateVariableName(propertyName);
                 }
                 else
-                {
-                    // This is a regular property.
+                    throw new JavaScriptException("SyntaxError", "Expected property name", 1, "");
+                this.Consume();
+                
+                // Read the colon.
+                this.Expect(PunctuatorToken.Colon);
 
-                    // Read the colon.
-                    this.Expect(PunctuatorToken.Colon);
+                // Now read the property value.
+                var propertyValue = ParseJSExpression(PunctuatorToken.Comma, PunctuatorToken.RightBrace);
 
-                    // Now read the property value.
-                    propertyValue = ParseExpression(PunctuatorToken.Comma, PunctuatorToken.RightBrace);
+                // In strict mode, properties cannot be added twice.
+                if (this.StrictMode == true && properties.ContainsKey(propertyName) == true)
+                    throw new JavaScriptException("SyntaxError", string.Format("Property name '{0}' already exists in object literal", propertyName), 1, "");
 
-                    // In strict mode, properties cannot be added twice.
-                    object existingValue;
-                    if (properties.TryGetValue(propertyName, out existingValue) == true)
-                    {
-                        if (existingValue is ObjectLiteralAccessor)
-                            throw new JavaScriptException(this.engine, "SyntaxError", string.Format("The property '{0}' cannot have both a data property and a getter/setter", propertyName), this.LineNumber, this.SourcePath);
-                        if (this.StrictMode == true)
-                            throw new JavaScriptException(this.engine, "SyntaxError", string.Format("The property '{0}' already has a value", propertyName), this.LineNumber, this.SourcePath);
-                    }
-
-                    // Add the property setter to the list.
-                    properties[propertyName] = propertyValue;
-                }
+                // Add the property setter to the list.
+                properties[propertyName] = propertyValue;
 
                 // Read past the comma.
                 Debug.Assert(this.nextToken == PunctuatorToken.Comma || this.nextToken == PunctuatorToken.RightBrace);
@@ -1887,64 +1752,317 @@ namespace Jurassic.Compiler
             // The end token '}' will be consumed by the parent function.
             Debug.Assert(this.nextToken == PunctuatorToken.RightBrace);
 
-            return new LiteralExpression(properties);
-        }
-
-        /// <summary>
-        /// Reads a property name, used in object literals.
-        /// </summary>
-        /// <param name="wasIdentifier"> Receives <c>true</c> if the property name was identifier;
-        /// <c>false</c> otherwise. </param>
-        /// <returns> The property name that was read. </returns>
-        private string ReadPropertyName(out bool wasIdentifier)
-        {
-            string propertyName;
-            if (this.nextToken is LiteralToken)
-            {
-                // The property name can be a string or a number or (in ES5) a keyword.
-                if (((LiteralToken)this.nextToken).IsKeyword == true)
-                {
-                    // false, true or null.
-                    propertyName = this.nextToken.Text;
-                }
-                else
-                {
-                    object literalValue = ((LiteralToken)this.nextToken).Value;
-                    if ((literalValue is string || literalValue is double || literalValue is int) == false)
-                        throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected property name but found {0}", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
-                    propertyName = ((LiteralToken)this.nextToken).Value.ToString();
-                }
-                wasIdentifier = false;
-            }
-            else if (this.nextToken is IdentifierToken)
-            {
-                // An identifier is also okay.
-                propertyName = ((IdentifierToken)this.nextToken).Name;
-                wasIdentifier = true;
-            }
-            else if (this.nextToken is KeywordToken)
-            {
-                // In ES5 a keyword is also okay.
-                propertyName = ((KeywordToken)this.nextToken).Name;
-                wasIdentifier = false;
-            }
-            else
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Expected property name but found {0}", Token.ToText(this.nextToken)), this.LineNumber, this.SourcePath);
-
-            // Consume the token.
-            this.Consume();
-
-            // Return the property name.
-            return propertyName;
+            return new LiteralJSExpression(properties);
         }
 
         /// <summary>
         /// Parses a function expression.
         /// </summary>
-        /// <returns> A function expression. </returns>
-        private FunctionExpression ParseFunctionExpression()
+        /// <returns> A literal expression representing the value of the function. </returns>
+        public LiteralJSExpression ParseFunctionExpression()
         {
-            return ParseFunction(FunctionType.Expression, this.currentScope);
+            // Create an expression representing the function.
+            var expression = ParseFunction(insideExpression: true);
+
+            // Return a literal containing the expression.
+            return new LiteralJSExpression(expression);
+        }
+
+        ///// <summary>
+        ///// Converts all UnboundOperatorExpression expressions in the given expression tree to real
+        ///// expressions.
+        ///// </summary>
+        ///// <param name="expression"> The root of the expression tree to convert. </param>
+        ///// <returns> A compilable expression tree. </returns>
+        //private Expression BindOperators(Expression expression)
+        //{
+        //    // Only unbound operators are transformed.
+        //    if ((expression is UnboundOperatorExpression) == false)
+        //        return expression;
+        //    var unboundExpression = (UnboundOperatorExpression)expression;
+
+        //    // Pop the operands off the stack.  The operands come off the stack in reverse order, so
+        //    // we reverse the order here.
+        //    Expression[] operands = new Expression[unboundExpression.Operands.Count];
+        //    for (int i = operands.Length - 1; i >= 0; i--)
+        //        operands[i] = BindOperators(unboundExpression.Operands.Pop());
+        //    throw new NotImplementedException();
+        //    //return unboundExpression.Operator.GetStaticExpression(operands);
+        //}
+
+
+
+        //     STATEMENT CONTEXT
+        //_________________________________________________________________________________________
+
+        private class StatementContext
+        {
+            /// <summary>
+            /// Gets the names of any labels.
+            /// </summary>
+            public List<string> LabelNames;
+
+            /// <summary>
+            /// Gets the label to jump to if a break statement is encountered.
+            /// </summary>
+            public LabelTarget BreakTarget;
+
+            /// <summary>
+            /// Gets the label to jump to if a continue statement is encountered.
+            /// </summary>
+            public LabelTarget ContinueTarget;
+
+            /// <summary>
+            /// Gets a value that indicates whether the current statement is a loop or switch
+            /// statement.
+            /// </summary>
+            public bool IsLoopOrSwitchStatement;
+        }
+
+        private class StatementContextStack
+        {
+            private Stack<StatementContext> stack = new Stack<StatementContext>();
+            private StatementContext current;
+
+            /// <summary>
+            /// Begins a new statement.
+            /// </summary>
+            public void BeginStatement()
+            {
+                if (this.current != null)
+                    this.stack.Push(this.current);
+                this.current = new StatementContext();
+            }
+
+            /// <summary>
+            /// Ends a statement.
+            /// </summary>
+            public void EndStatement()
+            {
+                if (this.stack.Count == 0)
+                    this.current = null;
+                else
+                    this.current = this.stack.Pop();
+            }
+
+            /// <summary>
+            /// Indicates the current statement has a label.
+            /// </summary>
+            /// <param name="labelName"> The name of the label. </param>
+            public void Label(string labelName)
+            {
+                // Check that the label doesn't already exist in the stack.
+                // This relies on the fact that all labels have break targets.
+                if (FindBreakTarget(labelName) != null)
+                    throw new JavaScriptException("SyntaxError", string.Format("Label '{0}' has already been declared", labelName), 1, "");
+
+                // Add a new label.
+                if (this.current.LabelNames == null)
+                    this.current.LabelNames = new List<string>();
+                this.current.LabelNames.Add(labelName);
+                this.current.BreakTarget = Expression.Label(labelName + "-break");
+            }
+
+            /// <summary>
+            /// Indicates the current statement is a loop.
+            /// </summary>
+            /// <param name="loopType"> The type of loop, e.g. "do", "while" or "for". </param>
+            public void Loop(string loopType)
+            {
+                this.current.ContinueTarget = Expression.Label(loopType + "-continue");
+                this.current.BreakTarget = Expression.Label(loopType + "-break");
+                this.current.IsLoopOrSwitchStatement = true;
+            }
+
+            /// <summary>
+            /// Indicates the current statement is a switch statement.
+            /// </summary>
+            public void Switch()
+            {
+                this.current.BreakTarget = Expression.Label("switch-break");
+                this.current.IsLoopOrSwitchStatement = true;
+            }
+
+            /// <summary>
+            /// Gets the context for the current statement.
+            /// </summary>
+            public StatementContext CurrentStatement
+            {
+                get { return this.current; }
+            }
+
+            /// <summary>
+            /// Finds a break target to jump to for the given label name.
+            /// </summary>
+            /// <param name="labelName"> The label to search for. </param>
+            /// <returns> A label to jump to, or <c>null</c> if the label wasn't found. </returns>
+            public LabelTarget FindBreakTarget(string labelName = null)
+            {
+                if (labelName == null)
+                {
+                    if (this.current.IsLoopOrSwitchStatement == true)
+                        return this.current.BreakTarget;
+                    foreach (var context in stack)
+                        if (context.IsLoopOrSwitchStatement == true)
+                            return context.BreakTarget;
+                }
+                else
+                {
+                    if (this.current.LabelNames != null && this.current.LabelNames.Contains(labelName))
+                        return this.current.BreakTarget;
+                    foreach (var context in stack)
+                        if (context.LabelNames != null && context.LabelNames.Contains(labelName))
+                            return context.BreakTarget;
+                }
+                return null;
+            }
+
+            /// <summary>
+            /// Finds a continue target to jump to for the given label name.
+            /// </summary>
+            /// <param name="labelName"> The label to search for. </param>
+            /// <returns> A label to jump to, or <c>null</c> if the label wasn't found. </returns>
+            public LabelTarget FindContinueTarget(string labelName = null)
+            {
+                if (labelName == null)
+                {
+                    if (this.current.IsLoopOrSwitchStatement == true && this.current.ContinueTarget != null)
+                        return this.current.ContinueTarget;
+                    foreach (var context in stack)
+                        if (context.IsLoopOrSwitchStatement == true && context.ContinueTarget != null)
+                            return context.ContinueTarget;
+                }
+                else
+                {
+                    if (this.current.LabelNames != null && this.current.LabelNames.Contains(labelName) && this.current.ContinueTarget != null)
+                        return this.current.ContinueTarget;
+                    foreach (var context in stack)
+                        if (context.LabelNames != null && context.LabelNames.Contains(labelName) && context.ContinueTarget != null)
+                            return context.ContinueTarget;
+                }
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the context for the current statement.
+        /// </summary>
+        private StatementContext CurrentStatement
+        {
+            get { return this.statementContextStack.CurrentStatement; }
+        }
+
+
+
+        //     COMPILATION
+        //_________________________________________________________________________________________
+
+        private System.Reflection.Emit.ModuleBuilder module;
+        private int methodCount = 0;
+
+        /// <summary>
+        /// Compiles the given expression and produces a delegate that can be called to execute the
+        /// code.
+        /// </summary>
+        /// <param name="expression"> The expression to compile. </param>
+        /// <param name="functionName"> The name of the function that is being compiled.  Can be
+        /// <c>null</c> or empty if a function name is not available. </param>
+        /// <returns> A delegate that can be used to execute the expression. </returns>
+        internal Func<LexicalScope, object> Compile(Expression expression, string functionName = null)
+        {
+            if (this.EnableDebugging == false)
+            {
+                // Compile the expression tree.
+                var lambdaExpression = Expression.Lambda<Func<LexicalScope, object>>(
+                    expression,
+                    this.executionContext.VariableEnvironment);
+                return lambdaExpression.Compile();
+            }
+            else
+            {
+                // Create a module if we haven't already.
+                if (module == null)
+                {
+                    // create a dynamic assembly and module 
+                    var assemblyBuilder = AppDomain.CurrentDomain.DefineDynamicAssembly(new System.Reflection.AssemblyName("JavaScript"), System.Reflection.Emit.AssemblyBuilderAccess.Run);
+
+                    // Mark generated code as debuggable.
+                    // See http://blogs.msdn.com/rmbyers/archive/2005/06/26/432922.aspx for explanation.
+                    Type daType = typeof(DebuggableAttribute);
+                    var daCtor = daType.GetConstructor(new Type[] { typeof(DebuggableAttribute.DebuggingModes) });
+                    var daBuilder = new System.Reflection.Emit.CustomAttributeBuilder(daCtor, new object[] { 
+                        DebuggableAttribute.DebuggingModes.DisableOptimizations | 
+                        DebuggableAttribute.DebuggingModes.Default });
+                    assemblyBuilder.SetCustomAttribute(daBuilder);
+
+                    module = assemblyBuilder.DefineDynamicModule("Module", true);
+                }
+
+                // create a new type to hold our Main method
+                var typeBuilder = module.DefineType("JavaScript" + (methodCount++).ToString(), System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Class);
+
+                // Create a method to hold the javascript code.
+                functionName = string.IsNullOrEmpty(functionName) ? "Main" : functionName;
+                var methodbuilder = typeBuilder.DefineMethod(functionName, System.Reflection.MethodAttributes.HideBySig | System.Reflection.MethodAttributes.Static | System.Reflection.MethodAttributes.Public,
+                    typeof(object), new Type[] { typeof(LexicalScope) });
+
+                // Convert to a lamba expression and compile it.
+                var lambdaExpression = Expression.Lambda<Func<LexicalScope, object>>(
+                    expression,
+                    this.executionContext.VariableEnvironment);
+                lambdaExpression.CompileToMethod(methodbuilder, System.Runtime.CompilerServices.DebugInfoGenerator.CreatePdbGenerator());
+
+                // bake it 
+                var helloWorldType = typeBuilder.CreateType();
+
+                // get the method
+                var method = helloWorldType.GetMethod(functionName);
+
+                return (Func<LexicalScope, object>)Delegate.CreateDelegate(typeof(Func<LexicalScope, object>), method);
+            }
+        }
+
+        /// <summary>
+        /// Parses and compiles the code and produces a delegate that can be called to execute the
+        /// code.
+        /// </summary>
+        /// <returns> A delegate that can be used to execute the code. </returns>
+        public Func<LexicalScope, object> Compile()
+        {
+            // Convert the source code into an expression tree.
+            var expressionTree = this.Parse();
+
+            // Compile the expression tree.
+            return Compile(expressionTree);
+        }
+
+
+
+        //     EVAL SUPPORT
+        //_________________________________________________________________________________________
+
+        /// <summary>
+        /// Evaluates the given javascript source code and returns the result.
+        /// </summary>
+        /// <param name="code"> The source code to evaluate. </param>
+        /// <param name="scriptContext"> The context the provided code will run in. </param>
+        /// <returns> The value of the last statement that was executed, or <c>undefined</c> if
+        /// there were no executed statements. </returns>
+        public static object Eval(string code)
+        {
+            // Create a new parser.
+            var parser = new Parser(new Lexer(new System.IO.StringReader(code), "[eval code]"), ScriptContext.Eval);
+
+            // Parse and compile the code.
+            var expressionFunc = parser.Compile();
+
+            // Execute the compiled lambda.
+            object result = expressionFunc(LexicalScope.Global);
+
+            // Transform null -> undefined.
+            if (result == null)
+                result = Undefined.Value;
+            return result;
         }
     }
 

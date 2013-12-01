@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using Jurassic.Compiler;
 
 namespace Jurassic.Library
@@ -7,11 +8,10 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents an arguments object.
     /// </summary>
-    [Serializable]
     public class ArgumentsInstance : ObjectInstance
     {
         private UserDefinedFunction callee;
-        private DeclarativeScope scope;
+        private LexicalScope scope;
         private bool[] mappedArguments;
 
 
@@ -24,9 +24,9 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="prototype"> The next object in the prototype chain. </param>
         /// <param name="callee"> The function that was called. </param>
-        /// <param name="scope"> The function scope. </param>
-        /// <param name="argumentValues"> The argument values that were passed to the function. </param>
-        public ArgumentsInstance(ObjectInstance prototype, UserDefinedFunction callee, DeclarativeScope scope, object[] argumentValues)
+        /// <param name="scope">  </param>
+        /// <param name="argumentValues"> The arguments that were passed to the function. </param>
+        internal ArgumentsInstance(ObjectInstance prototype, UserDefinedFunction callee, LexicalScope scope, object[] argumentValues)
             : base(prototype)
         {
             if (callee == null)
@@ -37,62 +37,21 @@ namespace Jurassic.Library
                 throw new ArgumentNullException("argumentValues");
             this.callee = callee;
             this.scope = scope;
-            this.FastSetProperty("length", argumentValues.Length, PropertyAttributes.NonEnumerable);
+            this.SetProperty("length", argumentValues.Length, PropertyAttributes.NonEnumerable);
+            this.SetProperty("callee", callee, PropertyAttributes.NonEnumerable);
 
-            if (this.callee.StrictMode == false)
+            // Create an array mappedArguments where mappedArguments[i] = true means a mapping is
+            // maintained between arguments[i] and the corresponding variable.
+            this.mappedArguments = new bool[argumentValues.Length];
+            var mappedNames = new HashSet<string>();
+            for (int i = argumentValues.Length - 1; i >= 0; i--)
             {
-                this.FastSetProperty("callee", callee, PropertyAttributes.NonEnumerable);
-
-
-                // Create an array mappedArguments where mappedArguments[i] = true means a mapping is
-                // maintained between arguments[i] and the corresponding variable.
-                this.mappedArguments = new bool[argumentValues.Length];
-                var mappedNames = new Dictionary<string, int>();    // maps argument name -> index
-                for (int i = 0; i < argumentValues.Length; i++)
+                this[(uint)i] = argumentValues[i];    // Note: this.mappedArguments[i] is currently false.
+                if (i < callee.ArgumentNames.Count)
                 {
-                    if (i < callee.ArgumentNames.Count)
-                    {
-                        // Check if the argument name appeared previously in the argument list.
-                        int previousIndex;
-                        if (mappedNames.TryGetValue(callee.ArgumentNames[i], out previousIndex) == true)
-                        {
-                            // The argument name has appeared before.  Remove the getter/setter.
-                            this.DefineProperty(previousIndex.ToString(), new PropertyDescriptor(argumentValues[previousIndex], PropertyAttributes.FullAccess), false);
-
-                            // The argument is no longer mapped.
-                            this.mappedArguments[previousIndex] = false;
-                        }
-
-                        // Add the argument name and index to the hashtable.
-                        mappedNames[callee.ArgumentNames[i]] = i;
-
-                        // The argument is mapped by default.
-                        this.mappedArguments[i] = true;
-
-                        // Define a getter and setter so that the property value reflects that of the argument.
-                        var getter = new UserDefinedFunction(this.Engine.Function.InstancePrototype, "ArgumentGetter", new string[0], this.scope, "return " + callee.ArgumentNames[i], ArgumentGetter, true);
-                        getter.SetPropertyValue("argumentIndex", i, false);
-                        var setter = new UserDefinedFunction(this.Engine.Function.InstancePrototype, "ArgumentSetter", new string[] { "value" }, this.scope, callee.ArgumentNames[i] + " = value", ArgumentSetter, true);
-                        setter.SetPropertyValue("argumentIndex", i, false);
-                        this.DefineProperty(i.ToString(), new PropertyDescriptor(getter, setter, PropertyAttributes.FullAccess), false);
-                    }
-                    else
-                    {
-                        // This argument is unnamed - no mapping needs to happen.
-                        this[(uint)i] = argumentValues[i];
-                    }
+                    // The argument name is mapped if it hasn't been seen before.
+                    this.mappedArguments[i] = mappedNames.Add(callee.ArgumentNames[i]);
                 }
-            }
-            else
-            {
-                // In strict mode, arguments items are not connected to the variables.
-                for (int i = 0; i < argumentValues.Length; i++)
-                    this[(uint)i] = argumentValues[i];
-
-                // In strict mode, accessing caller or callee is illegal.
-                var throwErrorFunction = new ThrowTypeErrorFunction(this.Engine.Function.InstancePrototype);
-                this.DefineProperty("caller", new PropertyDescriptor(throwErrorFunction, throwErrorFunction, PropertyAttributes.Sealed), false);
-                this.DefineProperty("callee", new PropertyDescriptor(throwErrorFunction, throwErrorFunction, PropertyAttributes.Sealed), false);
             }
         }
 
@@ -111,40 +70,86 @@ namespace Jurassic.Library
         }
 
         /// <summary>
-        /// Used to retrieve the value of an argument.
+        /// Gets the property descriptor for the property with the given array index.  The
+        /// prototype chain is not searched.
         /// </summary>
-        /// <param name="scriptEngine"> The associated script engine. </param>
-        /// <param name="scope"> The scope (global or eval context) or the parent scope (function
-        /// context). </param>
-        /// <param name="thisObject"> The value of the <c>this</c> keyword. </param>
-        /// <param name="functionObject"> The function object. </param>
-        /// <param name="argumentValues"> The arguments that were passed to the function. </param>
-        /// <returns> The result of calling the method. </returns>
-        private object ArgumentGetter(ScriptEngine engine, Compiler.Scope scope, object thisObject, Library.FunctionInstance functionObject, object[] argumentValues)
+        /// <param name="index"> The array index of the property. </param>
+        /// <returns> A property descriptor containing the property value and attributes.  The
+        /// result will be <c>PropertyDescriptor.Undefined</c> if the property doesn't exist. </returns>
+        internal override PropertyDescriptor GetOwnProperty(uint index)
         {
-            int argumentIndex = TypeConverter.ToInteger(functionObject.GetPropertyValue("argumentIndex"));
-            return this.scope.GetValue(this.callee.ArgumentNames[argumentIndex]);
+            // Maintain a mapping between the array elements of this object and the corresponding
+            // variable names.
+            if (index < this.mappedArguments.Length && this.mappedArguments[index] == true)
+            {
+                if (this.scope.HasBinding(this.callee.ArgumentNames[(int)index], true) == false)
+                    return PropertyDescriptor.Undefined;
+                object value = this.scope.GetBindingValue(this.callee.ArgumentNames[(int)index], false);
+                return new PropertyDescriptor(value, PropertyAttributes.NonEnumerable);
+            }
+
+            // Delegate to the base class implementation.
+            return base.GetOwnProperty(index);
         }
 
         /// <summary>
-        /// Used to set the value of an argument.
+        /// Gets the property descriptor for the property with the given name.  The prototype
+        /// chain is not searched.
         /// </summary>
-        /// <param name="scriptEngine"> The associated script engine. </param>
-        /// <param name="scope"> The scope (global or eval context) or the parent scope (function
-        /// context). </param>
-        /// <param name="thisObject"> The value of the <c>this</c> keyword. </param>
-        /// <param name="functionObject"> The function object. </param>
-        /// <param name="argumentValues"> The arguments that were passed to the function. </param>
-        /// <returns> The result of calling the method. </returns>
-        private object ArgumentSetter(ScriptEngine engine, Compiler.Scope scope, object thisObject, Library.FunctionInstance functionObject, object[] argumentValues)
+        /// <param name="propertyName"> The name of the property. </param>
+        /// <returns> A property descriptor containing the property value and attributes.  The
+        /// result will be <c>PropertyDescriptor.Undefined</c> if the property doesn't exist. </returns>
+        internal override PropertyDescriptor GetOwnProperty(string propertyName)
         {
-            int argumentIndex = TypeConverter.ToInteger(functionObject.GetPropertyValue("argumentIndex"));
-            if (argumentValues != null && argumentValues.Length >= 1)
+            // Check if the property name is an array index.
+            uint arrayIndex = ArrayInstance.ParseArrayIndex(propertyName);
+            if (arrayIndex != uint.MaxValue && arrayIndex < this.mappedArguments.Length && this.mappedArguments[arrayIndex] == true)
+                return GetOwnProperty(arrayIndex);
+
+            // "callee" and "caller" should throw TypeErrors in strict mode.
+            if (this.callee.StrictMode == true && (propertyName == "callee" || propertyName == "callee"))
+                throw new JavaScriptException("TypeError", "It is illegal to access arguments.callee or arguments.caller in strict mode");
+            
+            // Delegate to the base class implementation.
+            return base.GetOwnProperty(propertyName);
+        }
+
+        /// <summary>
+        /// Sets the value of the property with the given array index.
+        /// </summary>
+        /// <param name="index"> The array index of the property to set. </param>
+        /// <param name="value"> The value to set the property to. </param>
+        /// <param name="throwOnError"> <c>true</c> to throw an exception if the property could not
+        /// be set.  This can happen if the property is read-only or if the object is sealed. </param>
+        internal override void Put(uint index, object value, bool throwOnError)
+        {
+            // Maintain a mapping between the array elements of this object and the corresponding
+            // variable names.
+            if (index >= 0 && index < this.mappedArguments.Length && this.mappedArguments[index] == true)
             {
-                object value = argumentValues[0];
-                this.scope.SetValue(this.callee.ArgumentNames[argumentIndex], value);
+                this.scope.SetMutableBinding(this.callee.ArgumentNames[(int)index], value, false);
+                return;
             }
-            return Undefined.Value;
+
+            // Delegate to the base class implementation.
+            base.Put(index, value, throwOnError);
+        }
+
+        /// <summary>
+        /// Sets the value of the property with the given name.
+        /// </summary>
+        /// <param name="propertyName"> The name of the property to set. </param>
+        /// <param name="value"> The value to set the property to. </param>
+        /// <param name="throwOnError"> <c>true</c> to throw an exception if the property could not
+        /// be set.  This can happen if the property is read-only or if the object is sealed. </param>
+        internal override void Put(string propertyName, object value, bool throwOnError)
+        {
+            // "callee" and "caller" should throw TypeErrors in strict mode.
+            if (this.callee.StrictMode == true && (propertyName == "callee" || propertyName == "callee"))
+                throw new JavaScriptException("TypeError", "It is illegal to access arguments.callee or arguments.caller in strict mode");
+
+            // Delegate to the base class implementation.
+            base.Put(propertyName, value, throwOnError);
         }
 
         /// <summary>
@@ -152,20 +157,14 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="index"> The array index of the property to delete. </param>
         /// <param name="throwOnError"> <c>true</c> to throw an exception if the property could not
-        /// be set because the property was marked as non-configurable.  </param>
-        /// <returns> <c>true</c> if the property was successfully deleted, or if the property did
-        /// not exist; <c>false</c> if the property was marked as non-configurable and
-        /// <paramref name="throwOnError"/> was <c>false</c>. </returns>
-        public override bool Delete(uint index, bool throwOnError)
+        /// be set.  This can happen if the property is not configurable.  </param>
+        /// <returns> <c>true</c> if the property was successfully deleted; <c>false</c> otherwise. </returns>
+        internal override bool Delete(uint index, bool throwOnError)
         {
             // Break the mapping between the array element of this object and the corresponding
             // variable name.
-            if (index < this.mappedArguments.Length && this.mappedArguments[index] == true)
-            {
+            if (index >= 0 && index < this.mappedArguments.Length)
                 this.mappedArguments[index] = false;
-                var currentValue = this.scope.GetValue(this.callee.ArgumentNames[(int)index]);
-                DefineProperty(index.ToString(), new PropertyDescriptor(currentValue, PropertyAttributes.FullAccess), false);
-            }
 
             // Delegate to the base class implementation.
             return base.Delete(index, throwOnError);

@@ -230,9 +230,6 @@ namespace UnitTests
                 Assert.AreEqual(double.NaN, TestUtils.Evaluate("Math.max('bob')"));
                 Assert.AreEqual(double.NaN, TestUtils.Evaluate("Math.max('bob', 'dick', 'harry')"));
             }
-
-            // length
-            Assert.AreEqual(2, TestUtils.Evaluate("Math.max.length"));
         }
 
         [TestMethod]
@@ -257,9 +254,6 @@ namespace UnitTests
                 Assert.AreEqual(double.NaN, TestUtils.Evaluate("Math.min('bob')"));
                 Assert.AreEqual(double.NaN, TestUtils.Evaluate("Math.min('bob', 'dick', 'harry')"));
             }
-
-            // length
-            Assert.AreEqual(2, TestUtils.Evaluate("Math.min.length"));
         }
 
         [TestMethod]
@@ -300,25 +294,17 @@ namespace UnitTests
         [TestMethod]
         public void round()
         {
-            Assert.AreEqual(1, TestUtils.Evaluate("Math.round(0.5)"));
             Assert.AreEqual(1, TestUtils.Evaluate("Math.round(1.0)"));
             Assert.AreEqual(1, TestUtils.Evaluate("Math.round(1.2)"));
             Assert.AreEqual(2, TestUtils.Evaluate("Math.round(1.6)"));
             Assert.AreEqual(2, TestUtils.Evaluate("Math.round(1.5)"));
             Assert.AreEqual(3, TestUtils.Evaluate("Math.round(2.5)"));
 
-            Assert.AreEqual(0, TestUtils.Evaluate("Math.round(-0.5)"));
             Assert.AreEqual(-1, TestUtils.Evaluate("Math.round(-1.0)"));
             Assert.AreEqual(-1, TestUtils.Evaluate("Math.round(-1.2)"));
             Assert.AreEqual(-2, TestUtils.Evaluate("Math.round(-1.6)"));
             Assert.AreEqual(-1, TestUtils.Evaluate("Math.round(-1.5)"));
             Assert.AreEqual(-2, TestUtils.Evaluate("Math.round(-2.5)"));
-
-            // -0.1 rounds to -0, 0.1 rounds to +0
-            Assert.AreEqual(double.PositiveInfinity, TestUtils.Evaluate("1 / Math.round(0.1)"));
-            Assert.AreEqual(double.NegativeInfinity, TestUtils.Evaluate("1 / Math.round(-0.1)"));
-            Assert.AreEqual(double.PositiveInfinity, TestUtils.Evaluate("1 / Math.round(0)"));
-            Assert.AreEqual(double.NegativeInfinity, TestUtils.Evaluate("1 / Math.round(-0)"));
 
             Assert.AreEqual(0, TestUtils.Evaluate("Math.round(0)"));
             Assert.AreEqual(double.PositiveInfinity, TestUtils.Evaluate("Math.round(Infinity)"));

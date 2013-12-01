@@ -8,23 +8,18 @@ namespace Jurassic.Library
     /// <summary>
     /// Converts JSON text into a series of tokens.
     /// </summary>
-    internal sealed class JSONLexer
+    internal class JSONLexer
     {
-        private ScriptEngine engine;
         private TextReader reader;
 
         /// <summary>
         /// Creates a JSONLexer instance with the given source of text.
         /// </summary>
-        /// <param name="engine"> The script engine used to create error objects. </param>
         /// <param name="reader"> A reader that will supply the JSON source text. </param>
-        public JSONLexer(ScriptEngine engine, TextReader reader)
+        public JSONLexer(TextReader reader)
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
             if (reader == null)
                 throw new ArgumentNullException("reader");
-            this.engine = engine;
             this.reader = reader;
         }
 
@@ -84,7 +79,7 @@ namespace Jurassic.Library
                         // End of input.
                         return null;
                     default:
-                        throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Unexpected character '{0}'.", (char)c));
+                        throw new JavaScriptException("SyntaxError", string.Format("Unexpected character '{0}'.", (char)c));
                 }
             }
         }
@@ -123,7 +118,7 @@ namespace Jurassic.Library
             else if (keyword == "true")
                 return LiteralToken.True;
             else
-                throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Unexpected keyword '{0}'", keyword));
+                throw new JavaScriptException("SyntaxError", string.Format("Unexpected keyword '{0}'", keyword));
         }
 
         /// <summary>
@@ -133,38 +128,75 @@ namespace Jurassic.Library
         /// <returns> A numeric literal token. </returns>
         private Token ReadNumericLiteral(int firstChar)
         {
-            // The number may start with a minus sign.
-            bool negative = false;
-            if (firstChar == '-')
-            {
-                negative = true;
-                firstChar = this.reader.Read();
+            double result;
 
-                // If the first character is '-' then a digit must be the next character.
-                if (firstChar < '0' || firstChar > '9')
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid number.");
+            // The number may start with a negation.
+            double sign = firstChar == '-' ? -1.0 : 1.0;
+
+            // Read the integer component.
+            int digitsRead;
+            result = ReadInteger(firstChar == '-' ? 0 : firstChar - '0', out digitsRead);
+
+            // If the first character is '0' then a period must be the next character.
+            if (firstChar == '0' && digitsRead != 0)
+                throw new JavaScriptException("SyntaxError", "Invalid number");
+
+            // If the first character is '-' then a digit must be the next character.
+            if (firstChar == '-' && digitsRead == 0)
+                throw new JavaScriptException("SyntaxError", "Invalid number");
+
+            if (this.reader.Peek() == '.')
+            {
+                // Skip past the '.'.
+                this.reader.Read();
+
+                // Read the fractional component.
+                double fraction = ReadInteger(0.0, out digitsRead);
+                if (digitsRead == 0)
+                    throw new JavaScriptException("SyntaxError", "Invalid number");
+
+                // Apply the fractional component.
+                result += fraction / System.Math.Pow(10, digitsRead);
             }
 
-            NumberParser.ParseCoreStatus status;
-            double result = NumberParser.ParseCore(this.reader, (char)firstChar, out status);
-
-            // Handle various error cases.
-            switch (status)
+            if (reader.Peek() == 'e' || reader.Peek() == 'E')
             {
-                case NumberParser.ParseCoreStatus.NoDigits:
-                case NumberParser.ParseCoreStatus.NoExponent:
-                case NumberParser.ParseCoreStatus.NoFraction:
-                case NumberParser.ParseCoreStatus.ExponentHasLeadingZero:
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Invalid number.");
-                case NumberParser.ParseCoreStatus.HexLiteral:
-                case NumberParser.ParseCoreStatus.InvalidHexLiteral:
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Hexidecimal literals are not supported in JSON.");
-                case NumberParser.ParseCoreStatus.OctalLiteral:
-                case NumberParser.ParseCoreStatus.InvalidOctalLiteral:
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Octal literals are not supported in JSON.");
+                // Skip past the 'e'.
+                reader.Read();
+
+                // Read the sign of the exponent.
+                double exponentSign = 1.0;
+                int c = this.reader.Peek();
+                if (c == '+')
+                    this.reader.Read();
+                else if (c == '-')
+                {
+                    this.reader.Read();
+                    exponentSign = -1.0;
+                }
+
+                // 5e05 is invalid.  To detect this error we record the first digit.
+                firstChar = this.reader.Peek();
+
+                // Read the exponent.
+                double exponent = ReadInteger(0.0, out digitsRead) * exponentSign;
+
+                // Check a number was actually provided.
+                if (digitsRead == 0)
+                    throw new JavaScriptException("SyntaxError", "Invalid number.");
+
+                // If the first character of the exponent is '0' then a period must be the next character.
+                if (firstChar == '0' && digitsRead > 1)
+                    throw new JavaScriptException("SyntaxError", "Invalid number");
+
+                // Apply the exponent.
+                if (exponent >= 0)
+                    result *= System.Math.Pow(10, exponent);
+                else
+                    result /= System.Math.Pow(10, -exponent);
             }
 
-            return new LiteralToken(negative ? -result : result);
+            return new LiteralToken(result * sign);
         }
 
         /// <summary>
@@ -206,9 +238,9 @@ namespace Jurassic.Library
                 if (c == '"')
                     break;
                 if (c == -1)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected end of input in string literal");
+                    throw new JavaScriptException("SyntaxError", "Unexpected end of input in string literal");
                 if (c < 0x20)
-                    throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected character in string literal");
+                    throw new JavaScriptException("SyntaxError", "Unexpected character in string literal");
 
                 if (c == '\\')
                 {
@@ -253,7 +285,7 @@ namespace Jurassic.Library
                             contents.Append(ReadHexNumber(4));
                             break;
                         default:
-                            throw new JavaScriptException(this.engine, "SyntaxError", "Unexpected character in escape sequence.");
+                            throw new JavaScriptException("SyntaxError", "Unexpected character in escape sequence.");
                     }
                 }
                 else
@@ -277,7 +309,7 @@ namespace Jurassic.Library
                 int c = this.reader.Read();
                 contents.Append((char)c);
                 if (IsHexDigit(c) == false)
-                    throw new JavaScriptException(this.engine, "SyntaxError", string.Format("Invalid hex digit '{0}' in escape sequence.", (char)c));
+                    throw new JavaScriptException("SyntaxError", string.Format("Invalid hex digit '{0}' in escape sequence.", (char)c));
             }
             return (char)int.Parse(contents.ToString(), System.Globalization.NumberStyles.HexNumber);
         }

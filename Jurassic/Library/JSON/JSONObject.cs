@@ -6,7 +6,6 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents the built-in JSON object.
     /// </summary>
-    [Serializable]
     public class JSONObject : ObjectInstance
     {
 
@@ -47,10 +46,10 @@ namespace Jurassic.Library
         /// <param name="text"> The JSON text to parse. </param>
         /// <param name="reviver"> A function that will be called for each value. </param>
         /// <returns> The value of the JSON text. </returns>
-        [JSInternalFunction(Name = "parse", Flags = JSFunctionFlags.HasEngineParameter)]
-        public static object Parse(ScriptEngine engine, string text, [DefaultParameterValue(null)] object reviver = null)
+        [JSFunction(Name = "parse")]
+        public static object Parse(string text, object reviver = null)
         {
-            var parser = new JSONParser(engine, new JSONLexer(engine, new System.IO.StringReader(text)));
+            var parser = new JSONParser(new JSONLexer(new System.IO.StringReader(text)));
             parser.ReviverFunction = reviver as FunctionInstance;
             return parser.Parse();
         }
@@ -64,10 +63,10 @@ namespace Jurassic.Library
         /// <param name="spacer"> Either the number of spaces to use for indentation, or a string
         /// that is used for indentation. </param>
         /// <returns> The JSON string representing the value. </returns>
-        [JSInternalFunction(Name = "stringify", Flags = JSFunctionFlags.HasEngineParameter)]
-        public static string Stringify(ScriptEngine engine, object value, [DefaultParameterValue(null)] object replacer = null, [DefaultParameterValue(null)] object spacer = null)
+        [JSFunction(Name = "stringify")]
+        public static string Stringify(object value, object replacer = null, object spacer = null)
         {
-            var serializer = new JSONSerializer(engine);
+            var serializer = new JSONSerializer();
 
             // The replacer object can be either a function or an array.
             serializer.ReplacerFunction = replacer as FunctionInstance;
@@ -88,10 +87,8 @@ namespace Jurassic.Library
                 spacer = ((NumberInstance)spacer).Value;
             else if (spacer is StringInstance)
                 spacer = ((StringInstance)spacer).Value;
-            if (spacer is double)
+            if (spacer is double || spacer is int)
                 serializer.Indentation = new string(' ', Math.Max(Math.Min(TypeConverter.ToInteger((double)spacer), 10), 0));
-            else if (spacer is int)
-                serializer.Indentation = new string(' ', Math.Max(Math.Min(TypeConverter.ToInteger((int)spacer), 10), 0));
             else if (spacer is string)
                 serializer.Indentation = ((string)spacer).Substring(0, Math.Min(((string)spacer).Length, 10));
 

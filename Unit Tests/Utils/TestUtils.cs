@@ -17,18 +17,9 @@ namespace UnitTests
         [ThreadStatic]
         private static ActiveScriptEngine jscriptEngine;
 
-        [ThreadStatic]
-        private static Jurassic.ScriptEngine jurassicScriptEngine;
-
         public static JSEngine Engine
         {
             get { return JSEngine.Jurassic; }
-        }
-
-        public static Jurassic.CompatibilityMode CompatibilityMode
-        {
-            get { InitializeJurassic(); return jurassicScriptEngine.CompatibilityMode; }
-            set { InitializeJurassic(); jurassicScriptEngine.CompatibilityMode = value; }
         }
 
         public static object Evaluate(string script)
@@ -46,63 +37,34 @@ namespace UnitTests
             }
             else
             {
-                InitializeJurassic();
-                result = jurassicScriptEngine.Evaluate(script);
+                result = Jurassic.Library.GlobalObject.Eval(script);
+            }
+            if (result is double)
+            {
+                var numericResult = (double)result;
+                if ((double)((int)numericResult) == numericResult)
+                    return (int)numericResult;
             }
             return result;
         }
 
-        public static void Execute(string script)
-        {
-            if (Engine == JSEngine.JScript)
-                throw new NotImplementedException();
-            else
-            {
-                InitializeJurassic();
-                jurassicScriptEngine.Execute(script);
-            }
-        }
-
-        private static void InitializeJurassic()
-        {
-            if (jurassicScriptEngine == null)
-            {
-                jurassicScriptEngine = new Jurassic.ScriptEngine();
-#if DEBUG
-                jurassicScriptEngine.EnableDebugging = true;
-#endif
-            }
-        }
-
         public static object EvaluateExceptionType(string script)
         {
-            if (Engine == JSEngine.JScript)
+            try
             {
-                try
-                {
-                    Evaluate("try { " + script + "; globalErrorName = 'No error was thrown' } catch(e) { globalErrorName = e.name; }");
-                }
-                catch (System.Runtime.InteropServices.COMException ex)
-                {
-                    if (ex.Message == "Syntax error")
-                        return "SyntaxError";
-                    throw;
-                }
-                return Evaluate("globalErrorName");
+                Evaluate("try { " + script + "; globalErrorName = 'No error was thrown' } catch(e) { globalErrorName = e.name; }");
             }
-            else
+            catch (Jurassic.JavaScriptException ex)
             {
-                object result;
-                try
-                {
-                    result = Evaluate(script);
-                }
-                catch (Jurassic.JavaScriptException ex)
-                {
-                    return ex.Name;
-                }
-                return string.Format("No error was thrown (result was '{0}')", result);
+                return ex.Name;
             }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+                if (ex.Message == "Syntax error")
+                    return "SyntaxError";
+                throw;
+            }
+            return Evaluate("globalErrorName");
         }
 
         public static Jurassic.Library.PropertyAttributes EvaluateAccessibility(string objectExpression, string propertyName)
@@ -158,8 +120,7 @@ namespace UnitTests
                 while (totalTimeRemaining > 0)
                 {
                     // Reset the stopwatch.
-                    stopWatch.Reset();
-                    stopWatch.Start();
+                    stopWatch.Restart();
 
                     // Run the code to test.
                     codeToTest();
@@ -230,92 +191,6 @@ namespace UnitTests
                 Assert.Fail("Expected exception {0} but caught {1}.\r\n{2}", typeof(TException).FullName, ex.GetType().FullName, ex.ToString());
             }
             Assert.Fail("Expected exception {0} but no failure was observed.", typeof(TException).FullName);
-        }
-
-        /// <summary>
-        /// Removes spaces from the start of each line and removes extraneous line breaks from the
-        /// start and end of the given text.
-        /// </summary>
-        /// <param name="text"> The text to operate on. </param>
-        /// <param name="lineBreak"> The type of line break to normalize to. </param>
-        /// <returns> The text, but with extra space removed. </returns>
-        public static string NormalizeText(string text, string lineBreak = null)
-        {
-            if (text == null)
-                throw new ArgumentNullException("text");
-
-            // Find the maximum number of spaces that is common to each line.
-            bool startOfLine = true;
-            int indentationToRemove = int.MaxValue;
-            int startOfLineSpace = 0;
-            for (int i = 0; i < text.Length; i++)
-            {
-                if (text[i] == '\r' || text[i] == '\n')
-                {
-                    startOfLine = true;
-                    startOfLineSpace = 0;
-                }
-                else if (startOfLine == true)
-                {
-                    if (text[i] == ' ')
-                        startOfLineSpace++;
-                    else
-                    {
-                        indentationToRemove = Math.Min(indentationToRemove, startOfLineSpace);
-                        startOfLine = false;
-                    }
-                }
-            }
-
-            // Remove that amount of space from each line.
-            // Also, normalize line breaks to Environment.NewLine.
-            var result = new StringBuilder(text.Length);
-            int j = 0;
-            for (; j < Math.Min(indentationToRemove, text.Length); j++)
-                if (text[j] != ' ')
-                    break;
-            for (int i = j; i < text.Length; i++)
-            {
-                if (text[i] == '\r' || text[i] == '\n')
-                {
-                    if (text[i] == '\r' && i < text.Length - 1 && text[i + 1] == '\n')
-                        i++;
-                    result.Append(lineBreak == null ? Environment.NewLine : lineBreak);
-                    i++;
-                    for (j = i; j < Math.Min(i + indentationToRemove, text.Length); j++)
-                        if (text[j] != ' ')
-                            break;
-                    i = j - 1;
-                }
-                else
-                    result.Append(text[i]);
-            }
-            return result.ToString().Trim('\r', '\n');
-        }
-
-        /// <summary>
-        /// Changes the culture to run the the given action, then restores the culture.
-        /// </summary>
-        /// <param name="cultureName"> The culture name. </param>
-        /// <param name="action"> The action to run under the modified culture. </param>
-        public static T ChangeLocale<T>(string cultureName, Func<T> action)
-        {
-            // Save the current culture.
-            var previousCulture = System.Threading.Thread.CurrentThread.CurrentCulture;
-
-            // Replace it with a new culture.
-            System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo(cultureName, false);
-
-            try
-            {
-                // Run the action.
-                return action();
-            }
-            finally
-            {
-                // Restore the previous culture.
-                System.Threading.Thread.CurrentThread.CurrentCulture = previousCulture;
-            }
         }
     }
 }

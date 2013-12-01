@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents the built-in javascript Boolean object.
     /// </summary>
-    [Serializable]
     public class BooleanConstructor : ClrFunction
     {
 
@@ -18,7 +18,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="prototype"> The next object in the prototype chain. </param>
         internal BooleanConstructor(ObjectInstance prototype)
-            : base(prototype, "Boolean", new BooleanInstance(prototype.Engine.Object.InstancePrototype, false))
+            : base(prototype, "Boolean", new BooleanInstance(GlobalObject.Object.InstancePrototype, false))
         {
         }
 
@@ -43,7 +43,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="value"> The value to initialize to.  Defaults to false. </param>
         [JSConstructorFunction]
-        public BooleanInstance Construct([DefaultParameterValue(false)] bool value = false)
+        public BooleanInstance Construct(bool value = false)
         {
             return new BooleanInstance(this.InstancePrototype, value);
         }

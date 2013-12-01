@@ -34,15 +34,6 @@ namespace Jurassic.Compiler
         }
 
         /// <summary>
-        /// Gets a value that indicates whether the literal is a keyword.  Literal keywords are
-        /// <c>false</c>, <c>true</c> and <c>null</c>.
-        /// </summary>
-        public bool IsKeyword
-        {
-            get { return this.value is bool || this.value is Null; }
-        }
-
-        /// <summary>
         /// Gets a string that represents the token in a parseable form.
         /// </summary>
         public override string Text
@@ -59,44 +50,73 @@ namespace Jurassic.Compiler
     }
 
     /// <summary>
-    /// Represents a string literal.
+    /// Represents a multi-line literal (i.e. a string literal with line continuations).
     /// </summary>
-    internal class StringLiteralToken : LiteralToken
+    internal class MultiLineLiteralToken : LiteralToken
     {
-        public StringLiteralToken(string value, int escapeSequenceCount, int lineContinuationCount)
+        public MultiLineLiteralToken(object value, int lineTerminatorCount)
             : base(value)
         {
-            if (value == null)
-                throw new ArgumentNullException("value");
-            this.EscapeSequenceCount = escapeSequenceCount;
-            this.LineContinuationCount = lineContinuationCount;
+            this.LineTerminatorCount = lineTerminatorCount;
         }
 
         /// <summary>
-        /// Gets the number of character escape sequences encounted while parsing the string
-        /// literal.
+        /// Gets the number of line terminators encounted while parsing the string literal.  This
+        /// is not the same as the number of line terminators within the literal itself.
         /// </summary>
-        public int EscapeSequenceCount
+        public int LineTerminatorCount
+        {
+            get;
+            private set;
+        }
+    }
+
+    /// <summary>
+    /// Represents the value of a regular expression literal token.
+    /// </summary>
+    internal class RegularExpressionLiteralValue
+    {
+        /// <summary>
+        /// Creates a new RegularExpressionLiteralValue instance.
+        /// </summary>
+        /// <param name="body"> The regular expression text. </param>
+        /// <param name="flags"> One or more flag characters concatenated together to form a
+        /// string. </param>
+        public RegularExpressionLiteralValue(string body, string flags)
+        {
+            if (body == null)
+                throw new ArgumentNullException("body");
+            if (flags == null)
+                throw new ArgumentNullException("flags");
+            this.Body = body;
+            this.Flags = flags;
+        }
+
+        /// <summary>
+        /// Gets the regular expression text.
+        /// </summary>
+        public string Body
         {
             get;
             private set;
         }
 
         /// <summary>
-        /// Gets the number of line continuations encounted while parsing the string literal.
+        /// Gets one or more flag characters concatenated together to form a string.
         /// </summary>
-        public int LineContinuationCount
+        public string Flags
         {
             get;
             private set;
         }
 
         /// <summary>
-        /// Gets the contents of the string literal.
+        /// Returns a string representing this object.
         /// </summary>
-        public new string Value
+        /// <returns> A string representing this object. </returns>
+        public override string ToString()
         {
-            get { return (string)base.Value; }
+            return string.Format("/{0}/{1}", this.Body, this.Flags);
         }
     }
 

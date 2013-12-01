@@ -19,6 +19,9 @@ using System.Runtime.InteropServices;
 // COM, set the ComVisible attribute to true on that type.
 [assembly: ComVisible(false)]
 
+// The following GUID is for the ID of the typelib if this project is exposed to COM
+[assembly: Guid("dc3e09ae-fbce-48f7-a83d-efef62257918")]
+
 // Version information for an assembly consists of the following four values:
 //
 //      Major Version
@@ -28,14 +31,12 @@ using System.Runtime.InteropServices;
 //
 // You can specify all the values or you can default the Build and Revision Numbers 
 // by using the '*' as shown below:
-[assembly: AssemblyVersion("2.1.0.0")]
-
-// The AllowPartiallyTrustedCallersAttribute requires the assembly to be signed with a strong name
-// key.
-[assembly: System.Security.AllowPartiallyTrustedCallers]
+// [assembly: AssemblyVersion("1.0.*")]
+[assembly: AssemblyVersion("0.1.*")]
 
 // Unit tests and performance tests need access to internal members.
 [assembly: InternalsVisibleTo("Unit Tests")]
-//[assembly: InternalsVisibleTo("Performance")]
-//[assembly: InternalsVisibleTo("JavaScript")]
-//[assembly: InternalsVisibleTo("DebuggerTest")]
+[assembly: InternalsVisibleTo("Performance")]
+
+// The javascript generated module needs access to internal members.
+[assembly: InternalsVisibleTo("JavaScript")]

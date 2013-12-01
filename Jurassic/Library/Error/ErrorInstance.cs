@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace Jurassic.Library
@@ -7,7 +8,6 @@ namespace Jurassic.Library
     /// <summary>
     /// Represents the base class of all the javascript errors.
     /// </summary>
-    [Serializable]
     public class ErrorInstance : ObjectInstance
     {
 
@@ -22,13 +22,20 @@ namespace Jurassic.Library
         /// creating this property. </param>
         /// <param name="message"> The initial value of the message property.  Pass <c>null</c> to
         /// avoid creating this property. </param>
-        internal ErrorInstance(ObjectInstance prototype, string name, string message)
+        /// <param name="generateStack"> Indicates whether to generate a stack trace and attach it
+        /// to this object. </param>
+        internal ErrorInstance(ObjectInstance prototype, string name, string message, bool generateStack)
             : base(prototype)
         {
             if (name != null)
-                this.FastSetProperty("name", name, PropertyAttributes.FullAccess);
+                this.SetProperty("name", name, PropertyAttributes.FullAccess);
             if (message != null)
-                this.FastSetProperty("message", message, PropertyAttributes.FullAccess);
+                this.SetProperty("message", message, PropertyAttributes.FullAccess);
+            if (generateStack == true)
+            {
+                var stackTrace = string.Concat(this.ToStringJS(), Environment.NewLine, Environment.StackTrace);
+                this.SetProperty("stack", stackTrace, PropertyAttributes.FullAccess);
+            }
         }
 
 
@@ -62,26 +69,11 @@ namespace Jurassic.Library
         }
 
         /// <summary>
-        /// Gets the stack trace.  Note that this is populated when the object is thrown, NOT when
-        /// it is initialized.
+        /// Gets the stack trace
         /// </summary>
         public string Stack
         {
             get { return TypeConverter.ToString(this["stack"]); }
-        }
-
-        /// <summary>
-        /// Sets the stack trace information.
-        /// </summary>
-        /// <param name="errorName"> The name of the error (e.g. "ReferenceError"). </param>
-        /// <param name="message"> The error message. </param>
-        /// <param name="path"> The path of the javascript source file that is currently executing. </param>
-        /// <param name="function"> The name of the currently executing function. </param>
-        /// <param name="line"> The line number of the statement that is currently executing. </param>
-        internal void SetStackTrace(string path, string function, int line)
-        {
-            var stackTrace = this.Engine.FormatStackTrace(this.Name, this.Message, path, function, line);
-            this.FastSetProperty("stack", stackTrace, PropertyAttributes.FullAccess);
         }
 
 
@@ -93,13 +85,11 @@ namespace Jurassic.Library
         /// Returns a string representing the current object.
         /// </summary>
         /// <returns> A string representing the current object. </returns>
-        [JSInternalFunction(Name = "toString")]
-        public string ToStringJS()
+        [JSFunction(Name = "toString")]
+        public new string ToStringJS()
         {
             if (string.IsNullOrEmpty(this.Message))
                 return this.Name;
-            else if (string.IsNullOrEmpty(this.Name))
-                return this.Message;
             else
                 return string.Format("{0}: {1}", this.Name, this.Message);
         }

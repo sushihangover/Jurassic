@@ -7,180 +7,209 @@ namespace Performance
 {
 
     /// <summary>
-    /// Run the SunSpider performance tests.
+    /// Test the Parser object.
     /// </summary>
     [TestClass]
     public class SunSpider
     {
-        private static ScriptEngineManager manager;
-
-        [ClassInitialize]
-        public static void WarmUp(TestContext context)
-        {
-            manager = new ScriptEngineManager(@"..\..\..\Performance\Files\sunspider-0.9.1\");
-        }
-
         [TestMethod]
         public void threed_cube()
         {
-            manager.RunTest(@"3d-cube.js", 408);
+            RunTest(@"3d-cube.js", 1488);
         }
 
         [TestMethod]
         public void threed_morph()
         {
-            manager.RunTest(@"3d-morph.js", 205);
+            RunTest(@"3d-morph.js", 967);
         }
 
         [TestMethod]
         public void threed_raytrace()
         {
-            manager.RunTest(@"3d-raytrace.js", 443);
+            RunTest(@"3d-raytrace.js", 1495);
         }
 
         [TestMethod]
         public void access_binary_trees()
         {
-            manager.RunTest(@"access-binary-trees.js", 503);
+            RunTest(@"access-binary-trees.js", 1253);
         }
 
         [TestMethod]
         public void access_fannkuch()
         {
-            manager.RunTest(@"access-fannkuch.js", 543);
+            RunTest(@"access-fannkuch.js", 3291);
         }
 
         [TestMethod]
         public void access_nbody()
         {
-            manager.RunTest(@"access-nbody.js", 218);
+            RunTest(@"access-nbody.js", 1142);
         }
 
         [TestMethod]
         public void access_nsieve()
         {
-            manager.RunTest(@"access-nsieve.js", 357);
+            RunTest(@"access-nsieve.js", 1377);
         }
 
         [TestMethod]
         public void bitops_3bit_bits_in_byte()
         {
-            manager.RunTest(@"bitops-3bit-bits-in-byte.js", 27);
+            RunTest(@"bitops-3bit-bits-in-byte.js", 1027);
         }
 
         [TestMethod]
         public void bitops_bits_in_byte()
         {
-            manager.RunTest(@"bitops-bits-in-byte.js", 27);
+            RunTest(@"bitops-bits-in-byte.js", 1482);
         }
 
         [TestMethod]
         public void bitops_bitwise_and()
         {
-            manager.RunTest(@"bitops-bitwise-and.js", 51);
+            RunTest(@"bitops-bitwise-and.js", 906);
         }
 
         [TestMethod]
         public void bitops_nsieve_bits()
         {
-            manager.RunTest(@"bitops-nsieve-bits.js", 263);
+            RunTest(@"bitops-nsieve-bits.js", 1888);
         }
 
         [TestMethod]
         public void controlflow_recursive()
         {
-            manager.RunTest(@"controlflow-recursive.js", 41);
+            RunTest(@"controlflow-recursive.js", 1245);
         }
 
         [TestMethod]
         public void crypto_aes()
         {
-            manager.RunTest(@"crypto-aes.js", 434);
+            RunTest(@"crypto-aes.js", 1353);
         }
 
         [TestMethod]
         public void crypto_md5()
         {
-            manager.RunTest(@"crypto-md5.js", 311);
+            RunTest(@"crypto-md5.js", 1302);
         }
 
         [TestMethod]
         public void crypto_sha1()
         {
-            manager.RunTest(@"crypto-sha1.js", 176);
+            RunTest(@"crypto-sha1.js", 1096);
         }
 
         [TestMethod]
         public void date_format_tofte()
         {
-            manager.RunTest(@"date-format-tofte.js", 650);
+            RunTest(@"date-format-tofte.js", 627);
         }
 
         [TestMethod]
         public void date_format_xparb()
         {
-            manager.RunTest(@"date-format-xparb.js", 230);
+            RunTest(@"date-format-xparb.js", 725);
         }
 
         [TestMethod]
         public void math_cordic()
         {
-            manager.RunTest(@"math-cordic.js", 156);
+            RunTest(@"math-cordic.js", 1762);
         }
 
         [TestMethod]
         public void math_partial_sums()
         {
-            manager.RunTest(@"math-partial-sums.js", 80);
+            RunTest(@"math-partial-sums.js", 699);
         }
 
         [TestMethod]
         public void math_spectral_norm()
         {
-            manager.RunTest(@"math-spectral-norm.js", 134);
+            RunTest(@"math-spectral-norm.js", 693);
         }
 
         [TestMethod]
         public void regexp_dna()
         {
-            manager.RunTest(@"regexp-dna.js", 730);
+            RunTest(@"regexp-dna.js", 1546);
         }
 
         [TestMethod]
         public void string_base64()
         {
-            manager.RunTest(@"string-base64.js", 737);
+            RunTest(@"string-base64.js", 1165);
         }
 
         [TestMethod]
         public void string_fasta()
         {
-            manager.RunTest(@"string-fasta.js", 354);
+            RunTest(@"string-fasta.js", 1036);
         }
 
         [TestMethod]
         public void string_tagcloud()
         {
-            manager.RunTest(@"string-tagcloud.js", 581);
+            RunTest(@"string-tagcloud.js", 4175);
         }
 
         [TestMethod]
         public void string_unpack_code()
         {
-            manager.RunTest(@"string-unpack-code.js", 2995);
+            RunTest(@"string-unpack-code.js", 246);
         }
 
         [TestMethod]
         public void string_validate_input()
         {
-            manager.RunTest(@"string-validate-input.js", 377);
+            RunTest(@"string-validate-input.js", 7408);
         }
 
         //[TestMethod]
-        //public void RunAll()
+        //public void RunAllTests()
         //{
-        //    manager.RunAllTests(74683);
+        //    var timer = System.Diagnostics.Stopwatch.StartNew();
+        //    foreach (string path in Directory.EnumerateFiles(@"..\..\..\Performance\Files\sunspider-0.9.1"))
+        //        RunTest(path, 0, false);
+        //    Assert.Inconclusive(string.Format("{0}ms, was 40355ms", timer.ElapsedMilliseconds));
         //}
+
+        private void RunTest(string scriptPath, double previous, bool assertResults = true)
+        {
+            scriptPath = Path.Combine(@"..\..\..\Performance\Files\sunspider-0.9.1\", scriptPath);
+            var script = File.ReadAllText(scriptPath);
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+
+            // Parse the javascript code.
+            var parser = new Jurassic.Compiler.Parser(new Jurassic.Compiler.Lexer(new StreamReader(scriptPath), scriptPath), Jurassic.Compiler.ScriptContext.Global);
+            parser.EnableDebugging = true;
+            var expressionTree = parser.Parse();
+            double parseTime = timer.Elapsed.TotalMilliseconds;
+
+            // Compile the code.
+            var func = parser.Compile(expressionTree);
+            var scope = new Jurassic.Compiler.LexicalScope(null, GlobalObject.Instance, false);
+            double compilationTime = timer.Elapsed.TotalMilliseconds - parseTime;
+
+            // Run the javascript code.
+            func(scope);
+
+            double runTime = timer.Elapsed.TotalMilliseconds - compilationTime;
+            string infoString = string.Format("{1:n1}ms (parse: {2:n1}ms, compile: {3:n1}ms, runtime: {4:n1}ms)",
+                Path.GetFileNameWithoutExtension(scriptPath),
+                parseTime + compilationTime + runTime,
+                parseTime,
+                compilationTime,
+                runTime);
+            if (previous > 0)
+                infoString += string.Format(", was {0:n1}ms", previous);
+            Console.WriteLine("{0}: {1}", Path.GetFileNameWithoutExtension(scriptPath), infoString);
+            if (assertResults == true)
+                throw new AssertInconclusiveException(infoString);
+        }
     }
 
 }

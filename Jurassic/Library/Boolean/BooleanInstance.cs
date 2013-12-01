@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents an instance of the JavaScript Boolean object.
     /// </summary>
-    [Serializable]
     public class BooleanInstance : ObjectInstance
     {
         private bool value;
@@ -59,7 +59,7 @@ namespace Jurassic.Library
         /// Returns the underlying primitive value of the current object.
         /// </summary>
         /// <returns> The underlying primitive value of the current object. </returns>
-        [JSInternalFunction(Name = "valueOf")]
+        [JSFunction(Name = "valueOf")]
         public new bool ValueOf()
         {
             return this.value;
@@ -69,8 +69,8 @@ namespace Jurassic.Library
         /// Returns a string representing this object.
         /// </summary>
         /// <returns> A string representing this object. </returns>
-        [JSInternalFunction(Name = "toString")]
-        public string ToStringJS()
+        [JSFunction(Name = "toString")]
+        public new string ToStringJS()
         {
             return this.value ? "true" : "false";
         }

@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents the built-in javascript String object.
     /// </summary>
-    [Serializable]
     public class StringConstructor : ClrFunction
     {
         
@@ -18,7 +18,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="prototype"> The next object in the prototype chain. </param>
         internal StringConstructor(ObjectInstance prototype)
-            : base(prototype, "String", new StringInstance(prototype.Engine.Object.InstancePrototype, string.Empty))
+            : base(prototype, "String", new StringInstance(GlobalObject.Object.InstancePrototype, string.Empty))
         {
         }
 
@@ -76,7 +76,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="charCodes"></param>
         /// <returns></returns>
-        [JSInternalFunction(Name = "fromCharCode")]
+        [JSFunction(Name = "fromCharCode")]
         public static string FromCharCode(params double[] charCodes)
         {
             // Note: charCodes must be an array of doubles, because the default marshalling

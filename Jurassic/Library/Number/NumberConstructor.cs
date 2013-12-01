@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Jurassic.Library
 {
     /// <summary>
     /// Represents the built-in javascript Number object.
     /// </summary>
-    [Serializable]
     public class NumberConstructor : ClrFunction
     {
 
@@ -18,7 +18,7 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="prototype"> The next object in the prototype chain. </param>
         internal NumberConstructor(ObjectInstance prototype)
-            : base(prototype, "Number", new NumberInstance(prototype.Engine.Object.InstancePrototype, 0))
+            : base(prototype, "Number", new NumberInstance(GlobalObject.Object.InstancePrototype, 0))
         {
         }
 

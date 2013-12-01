@@ -7,9 +7,8 @@ namespace Jurassic.Library
     /// <summary>
     /// Converts a value into JSON text.
     /// </summary>
-    internal sealed class JSONSerializer
+    internal class JSONSerializer
     {
-        private ScriptEngine engine;
         private Stack<ObjectInstance> objectStack;
         private Stack<ArrayInstance> arrayStack;
         private string separator;
@@ -17,12 +16,8 @@ namespace Jurassic.Library
         /// <summary>
         /// Creates a new JSONSerializer instance with the default options.
         /// </summary>
-        /// <param name="engine"> The associated script engine. </param>
-        public JSONSerializer(ScriptEngine engine)
+        public JSONSerializer()
         {
-            if (engine == null)
-                throw new ArgumentNullException("engine");
-            this.engine = engine;
         }
 
         /// <summary>
@@ -66,7 +61,7 @@ namespace Jurassic.Library
             this.separator = string.IsNullOrEmpty(this.Indentation) ? string.Empty : "\n";
 
             // Create a temp object to hold the value.
-            var tempObject = this.engine.Object.Construct();
+            var tempObject = GlobalObject.Object.Construct();
             tempObject[string.Empty] = value;
 
             // Transform the value.
@@ -100,7 +95,7 @@ namespace Jurassic.Library
 
             // Transform the value by calling the replacer function, if one was provided.
             if (this.ReplacerFunction != null)
-                value = this.ReplacerFunction.CallFromNative("stringify", holder, propertyName, value);
+                value = this.ReplacerFunction.CallLateBound(holder, propertyName, value);
 
             return value;
         }
@@ -130,7 +125,7 @@ namespace Jurassic.Library
             {
                 if (propertyName == null)
                     propertyName = arrayIndex.ToString();
-                value = this.ReplacerFunction.CallFromNative("stringify", holder, propertyName, value);
+                value = this.ReplacerFunction.CallLateBound(holder, propertyName, value);
             }
 
             return value;
@@ -171,9 +166,9 @@ namespace Jurassic.Library
             }
 
             // Serialize a string value.
-            if (value is string || value is ConcatenatedString)
+            if (value is string)
             {
-                QuoteString(value.ToString(), result);
+                QuoteString((string)value, result);
                 return;
             }
 
@@ -183,7 +178,7 @@ namespace Jurassic.Library
                 if (double.IsInfinity((double)value) == true || double.IsNaN((double)value))
                     result.Append("null");
                 else
-                    result.Append(NumberFormatter.ToString((double)value, 10, NumberFormatter.Style.Regular));
+                    result.Append(((double)value).ToString());
                 return;
             }
             if (value is int)
@@ -221,12 +216,12 @@ namespace Jurassic.Library
             result.Append('\"');
 
             // Check if there are characters that need to be escaped.
-            // These characters include '"', '\' and any character with an ASCII value less than 32.
+            // These characters include '\' and any character with an ASCII value less than 32.
             bool containsUnsafeCharacters = false;
             for (int i = 0; i < input.Length; i++)
             {
                 char c = input[i];
-                if (c == '\\' || c == '\"' || c < 0x20)
+                if (c == '\\' || c < 0x20)
                 {
                     containsUnsafeCharacters = true;
                     break;
@@ -295,7 +290,7 @@ namespace Jurassic.Library
 
             // Check for cyclical references.
             if (this.objectStack.Contains(value) == true)
-                throw new JavaScriptException(this.engine, "TypeError", "The given object must not contain cyclical references");
+                throw new JavaScriptException("TypeError", "The given object must not contain cyclical references");
             this.objectStack.Push(value);
 
             // Create a list of property names to serialize.
@@ -359,7 +354,7 @@ namespace Jurassic.Library
 
             // Check for cyclical references.
             if (this.arrayStack.Contains(value) == true)
-                throw new JavaScriptException(this.engine, "TypeError", "The given object must not contain cyclical references");
+                throw new JavaScriptException("TypeError", "The given object must not contain cyclical references");
             this.arrayStack.Push(value);
 
             result.Append('[');

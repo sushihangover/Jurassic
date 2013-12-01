@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Linq;
 
 namespace Jurassic.Library
 {
@@ -11,7 +11,6 @@ namespace Jurassic.Library
     /// None of the methods of the Number prototype are generic; they should throw <c>TypeError</c>
     /// if the <c>this</c> value is not a Number object or a number primitive.
     /// </remarks>
-    [Serializable]
     public class NumberInstance : ObjectInstance
     {
         /// <summary>
@@ -70,22 +69,13 @@ namespace Jurassic.Library
         /// <returns> A string representation of a number in exponential notation. The string
         /// contains one digit before the significand's decimal point, and may contain
         /// fractionDigits digits after it. </returns>
-        [JSInternalFunction(Name = "toExponential")]
-        public string ToExponential(object fractionDigits)
+        [JSFunction(Name = "toExponential")]
+        public string ToExponential(int fractionDigits = 20)
         {
-            // If precision is undefined, the number of digits is dependant on the number.
-            if (TypeUtilities.IsUndefined(fractionDigits))
-                return NumberFormatter.ToString(this.value, 10, NumberFormatter.Style.Exponential, -1);
-
-            // Convert the parameter to an integer.
-            int fractionDigits2 = TypeConverter.ToInteger(fractionDigits);
-
-            // Check the parameter is within range.
-            if (fractionDigits2 < 0 || fractionDigits2 > 20)
-                throw new JavaScriptException(this.Engine, "RangeError", "toExponential() argument must be between 0 and 20.");
-
-            // NumberFormatter does the hard work.
-            return NumberFormatter.ToString(this.value, 10, NumberFormatter.Style.Exponential, fractionDigits2);
+            if (fractionDigits < 0 || fractionDigits > 20)
+                throw new JavaScriptException("RangeError", "toExponential() argument must be between 0 and 20.");
+            return this.value.ToString(string.Concat("0.", new string('#', fractionDigits), "e+0"),
+                System.Globalization.CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -98,34 +88,44 @@ namespace Jurassic.Library
         /// fractionDigits digits after it.
         /// If fractionDigits is not supplied or undefined, the toFixed method assumes the value
         /// is zero. </returns>
-        [JSInternalFunction(Name = "toFixed")]
-        public string ToFixed([DefaultParameterValue(0)] int fractionDigits = 0)
+        [JSFunction(Name = "toFixed")]
+        public string ToFixed(int fractionDigits = 0)
         {
-            // Check the parameter is within range.
             if (fractionDigits < 0 || fractionDigits > 20)
-                throw new JavaScriptException(this.Engine, "RangeError", "toFixed() argument must be between 0 and 20.");
-
-            // NumberFormatter does the hard work.
-            return NumberFormatter.ToString(this.value, 10, NumberFormatter.Style.Fixed, fractionDigits);
+                throw new JavaScriptException("RangeError", "toFixed() argument must be between 0 and 20.");
+            return this.value.ToString("f" + fractionDigits, System.Globalization.CultureInfo.InvariantCulture);
         }
 
         /// <summary>
         /// Returns a string containing a locale-dependant version of the number.
         /// </summary>
         /// <returns> A string containing a locale-dependant version of the number. </returns>
-        [JSInternalFunction(Name = "toLocaleString")]
+        [JSFunction(Name = "toLocaleString")]
         public new string ToLocaleString()
         {
-            // NumberFormatter does the hard work.
-            return NumberFormatter.ToString(this.value, 10, CultureInfo.CurrentCulture.NumberFormat, NumberFormatter.Style.Regular);
+            return this.value.ToString();
+        }
+        
+        /// <summary>
+        /// Returns a string containing a number represented either in exponential or fixed-point
+        /// notation.
+        /// </summary>
+        /// <returns> A string containing a number represented either in exponential or fixed-point
+        /// notation </returns>
+        /// <remarks>
+        /// If precision is not supplied or is undefined, the toString method is called instead.
+        /// </remarks>
+        [JSFunction(Name = "toPrecision")]
+        public string ToPrecision()
+        {
+            return ToString();
         }
 
         /// <summary>
         /// Returns a string containing a number represented either in exponential or fixed-point
         /// notation with a specified number of digits.
         /// </summary>
-        /// <param name="precision"> The number of significant digits. Must be in the range 1 – 21,
-        /// inclusive. </param>
+        /// <param name="precision"> Number of significant digits. Must be in the range 1 – 21, inclusive. </param>
         /// <returns> A string containing a number represented either in exponential or fixed-point
         /// notation with a specified number of digits. </returns>
         /// <remarks>
@@ -134,22 +134,13 @@ namespace Jurassic.Library
         /// returned.
         /// If precision is not supplied or is undefined, the toString method is called instead.
         /// </remarks>
-        [JSInternalFunction(Name = "toPrecision")]
-        public string ToPrecision(object precision)
+        [JSFunction(Name = "toPrecision", Flags = FunctionBinderFlags.HasThisObject)]
+        public string ToPrecision(int precision)
         {
-            // If precision is undefined, delegate to "toString()".
-            if (TypeUtilities.IsUndefined(precision))
-                return this.ToStringJS();
-
-            // Convert the parameter to an integer.
-            int precision2 = TypeConverter.ToInteger(precision);
-
-            // Check the precision is in range.
-            if (precision2 < 1 || precision2 > 21)
-                throw new JavaScriptException(this.Engine, "RangeError", "toPrecision() argument must be between 0 and 21.");
-
-            // NumberFormatter does the hard work.
-            return NumberFormatter.ToString(this.value, 10, NumberFormatter.Style.Precision, precision2);
+            if (precision < 0 || precision > 21)
+                throw new JavaScriptException("RangeError", "toPrecision() argument must be between 0 and 21.");
+            return this.value.ToString("g" + precision, System.Globalization.CultureInfo.InvariantCulture).
+                Replace("e+0", "e+").Replace("e-0", "e-");  // Hack: remove the extra zero in the exponent.
         }
 
         /// <summary>
@@ -157,22 +148,94 @@ namespace Jurassic.Library
         /// </summary>
         /// <param name="radix"> Specifies a radix for converting numeric values to strings. </param>
         /// <returns> The textual representation of the number. </returns>
-        [JSInternalFunction(Name = "toString")]
-        public string ToStringJS([DefaultParameterValue(10)] int radix = 10)
+        [JSFunction(Name = "toString")]
+        public string ToStringJS(int radix = 10)
         {
-            // Check the parameter is in range.
             if (radix < 2 || radix > 36)
-                throw new JavaScriptException(this.Engine, "RangeError", "The radix must be between 2 and 36, inclusive.");
+                throw new JavaScriptException("RangeError", "The radix must be between 2 and 36, inclusive.");
 
-            // NumberFormatter does the hard work.
-            return NumberFormatter.ToString(this.value, radix, NumberFormatter.Style.Regular);
+            // Check for common case: base 10.
+            if (radix == 10)
+                return this.value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            // Unusual base.
+            double value = this.value;
+            var result = new System.Text.StringBuilder(10);
+
+            // Handle NaN.
+            if (double.IsNaN(value))
+                return "NaN";
+
+            // Handle negative numbers.
+            if (value < 0)
+            {
+                value = -value;
+                result.Append('-');
+            }
+
+            // Handle infinity.
+            if (double.IsInfinity(value))
+            {
+                result.Append("Infinity");
+                return result.ToString();
+            }
+
+            // Keep track of how many significant digits we have outputted.
+            bool significantDigitsEncountered = false;
+            int significantFigures = 0;
+
+            // Calculate the number of digits in front of the decimal point.
+            int numDigits = (int)Math.Max(Math.Log(value, radix), 0.0) + 1;
+
+            // Output the digits in front of the decimal point.
+            double radixPow = Math.Pow(radix, -numDigits);
+            for (int i = numDigits; i > 0; i--)
+            {
+                radixPow *= radix;
+                int digit = (int)(value * radixPow);
+                if (digit < 10)
+                    result.Append((char)('0' + digit));
+                else
+                    result.Append((char)('a' + digit - 10));
+                if (digit != 0)
+                    significantDigitsEncountered = true;
+                if (significantDigitsEncountered == true)
+                    significantFigures++;
+                value -= digit / radixPow;
+            }
+
+            if (value != 0)
+            {
+                // Output the digits after the decimal point.
+                result.Append('.');
+                do
+                {
+                    radixPow *= radix;
+                    int digit = (int)(value * radixPow);
+                    if (digit < 10)
+                        result.Append((char)('0' + digit));
+                    else
+                        result.Append((char)('a' + digit - 10));
+                    if (digit != 0)
+                        significantDigitsEncountered = true;
+                    if (significantDigitsEncountered == true)
+                        significantFigures++;
+                    value -= digit / radixPow;
+                } while (value > 0 && significantFigures < 19);
+            }
+
+            return result.ToString();
+
+            // 0.3333333333333333
+            // 0.3333333333333333
+            // 0.333333333333333
         }
 
         /// <summary>
         /// Returns the primitive value of the specified object.
         /// </summary>
         /// <returns> The primitive value of the specified object. </returns>
-        [JSInternalFunction(Name = "valueOf")]
+        [JSFunction(Name = "valueOf", Flags = FunctionBinderFlags.HasThisObject)]
         public new double ValueOf()
         {
             return this.value;
