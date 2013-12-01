@@ -7,3 +7,4 @@ _ReSharper.*
 TestResults/*
 *.user.gitignore
 .git
+.DS_Store
