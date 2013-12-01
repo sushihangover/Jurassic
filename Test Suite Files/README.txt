@@ -1,1 +1,0 @@
-test262 files sourced from http://hg.ecmascript.org/tests/test262/summary
