@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -13,7 +13,7 @@ namespace Jurassic.TestSuite
             var timer = System.Diagnostics.Stopwatch.StartNew();
             var engine = new Jurassic.ScriptEngine();
             Console.WriteLine("Start-up time: {0}ms", timer.ElapsedMilliseconds);
-            using (var testSuite = new TestSuite(@"..\..\..\Test Suite Files\"))
+			using (var testSuite = new TestSuite(@"../../../Test Suite Files/"))
             {
                 //testSuite.RunInSandbox = true;
                 //testSuite.IncludedTests.Add("12.7-1");
@@ -37,8 +37,11 @@ namespace Jurassic.TestSuite
 
         private static void OnTestFinished(object sender, TestEventArgs e)
         {
-            if (e.Status == TestRunStatus.Success && (e.Test.Suite.ExecutedTestCount % 20) != 0)
-                return;
+			if (e.Status == TestRunStatus.Success && (e.Test.Suite.ExecutedTestCount % 20) != 0) {
+				Console.WriteLine (e.Test.Name);
+				//				Console.W
+				return;
+			}
             lock (lockObject)
             {
                 if (e.Status == TestRunStatus.Failed)
@@ -47,6 +50,9 @@ namespace Jurassic.TestSuite
                         Console.WriteLine();
                     var mode = e.StrictMode ? " (strict)" : "";
                     Console.WriteLine("{0}{1}: {2}", e.Test.Name, mode, e.FailureException.Message);
+					if (e.Test.Name == "S15.4.4.8_A3_T3") {
+						Console.WriteLine ("What is happening now....?");
+					}
                     newlineRequired = false;
                     //Console.WriteLine(e.Test.Script);
                 }

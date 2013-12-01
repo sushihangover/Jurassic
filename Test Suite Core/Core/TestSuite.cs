@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -14,6 +14,7 @@ namespace Jurassic.TestSuite
     /// </summary>
     public class TestSuite : IDisposable
     {
+		private int resetAppDomainCounter = 200;
         private Stream zipStream;
         private ZipFile zipFile;
         private List<string> skippedTestNames = new List<string>();
@@ -32,6 +33,7 @@ namespace Jurassic.TestSuite
                 path => new FileStream(Path.Combine(storagePath, path), FileMode.Open, FileAccess.Read)
             )
         {
+			AppDomainResetEveryXTestRuns ();
         }
 
         /// <summary>
@@ -47,7 +49,7 @@ namespace Jurassic.TestSuite
             this.IncludedTests = new List<string>();
 
             // Open the excludelist.xml file to generate a list of skipped file names.
-            var reader = System.Xml.XmlReader.Create(openFile(@"config\excludeList.xml"));
+			var reader = System.Xml.XmlReader.Create(openFile(@"config/excludeList.xml"));
             reader.ReadStartElement("excludeList");
             do
             {
@@ -61,10 +63,14 @@ namespace Jurassic.TestSuite
             includeBuilder.AppendLine(ReadInclude(openFile, "sta.js"));
             includeBuilder.AppendLine(ReadInclude(openFile, "ed.js"));
             this.includes = includeBuilder.ToString();
-
-            this.zipStream = openFile(@"suite\2012-05-18.zip");
+#if d067d2f0ca30_2013_06_13_10_07_0400
+			this.zipStream = openFile(@"suite/d067d2f0ca30_2013_06_13_10_07_0400.zip");
+#else
+			this.zipStream = openFile(@"suite/2012-05-18.zip");
+#endif
             this.zipFile = new ZipFile(this.zipStream);
             this.ApproximateTotalTestCount = (int)this.zipFile.Count;
+			AppDomainResetEveryXTestRuns ();
         }
 
         /// <summary>
@@ -423,6 +429,22 @@ namespace Jurassic.TestSuite
 
 #if !SILVERLIGHT
 
+		private void AppDomainResetEveryXTestRuns ()
+		{
+			// Original comments:
+			// Reset the test count every 200 tests so the AppDomain gets recreated.
+			// This saves us from an unavoidable memory leak in low privilege mode.
+			// For Mono:
+			// This helps with degrading performance in the Mono GC nursary seen in the new SGEN in 3.x
+			// fyi: you could increase the nurse size via cmd line args to aviod this, but did not want to
+			// have different startup options for running on Mono.
+			if (Type.GetType ("Mono.Runtime") != null) {
+				resetAppDomainCounter = 1;
+			} else {
+				resetAppDomainCounter = 200;
+			}
+		}
+
         /// <summary>
         /// Pulls tests from a queue and runs them inside a sandbox.
         /// </summary>
@@ -446,13 +468,15 @@ namespace Jurassic.TestSuite
                         AppDomain.Unload(appDomain);
 
                     // Create an AppDomain with internet sandbox permissions.
-                    var e = new System.Security.Policy.Evidence();
-                    e.AddHostEvidence(new System.Security.Policy.Zone(System.Security.SecurityZone.Internet));
-                    appDomain = AppDomain.CreateDomain(
-                        "Jurassic sandbox",
-                        null,
-                        new AppDomainSetup() { ApplicationBase = AppDomain.CurrentDomain.BaseDirectory },
-                        System.Security.SecurityManager.GetStandardSandbox(e));
+					// TODO: AddHostEvidence does not exist in Mono 3.2.5 (?), for test suite use null
+					// var e = new System.Security.Policy.Evidence();
+					// e.AddHostEvidence(new System.Security.Policy.Zone(System.Security.SecurityZone.Internet));
+					appDomain = AppDomain.CreateDomain(
+						"Jurassic sandbox",
+						null,
+						new AppDomainSetup() { ApplicationBase = AppDomain.CurrentDomain.BaseDirectory },
+						null // System.Security.SecurityManager.GetStandardSandbox(e));
+					);
                 }
 
                 // Retrieve a test from the queue.
@@ -486,10 +510,8 @@ namespace Jurassic.TestSuite
                 // Run the test.
                 RunTest(scriptEngineProxy.Execute, executionState);
 
-                // Reset the test count every 200 tests so the AppDomain gets recreated.
-                // This saves us from an unavoidable memory leak in low privilege mode.
                 testCounter++;
-                if (testCounter == 200)
+				if (testCounter == resetAppDomainCounter)
                     testCounter = 0;
 
             }

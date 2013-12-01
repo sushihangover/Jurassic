@@ -28,11 +28,14 @@ using System.Runtime.InteropServices;
 //
 // You can specify all the values or you can default the Build and Revision Numbers 
 // by using the '*' as shown below:
-[assembly: AssemblyVersion("2.1.0.0")]
+[assembly: AssemblyVersion("2.1.0.1")]
 
 // The AllowPartiallyTrustedCallersAttribute requires the assembly to be signed with a strong name
 // key.
-[assembly: System.Security.AllowPartiallyTrustedCallers]
+//TODO : Research why Mono is having issues with:
+//[assembly: System.Security.AllowPartiallyTrustedCallers]
+// using the following for now, but what are the MS .Net implications?
+[assembly: System.Security.SecurityRules(System.Security.SecurityRuleSet.Level1)]
 
 // Unit tests and performance tests need access to internal members.
 [assembly: InternalsVisibleTo("Unit Tests")]

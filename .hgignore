@@ -10,3 +10,4 @@ TestResults/*
 .DS_Store
 */.DS_Store
 .gitignore
+packages

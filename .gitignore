@@ -9,3 +9,4 @@ TestResults/*
 .hgtags
 .hg
 .DS_Store
+packages

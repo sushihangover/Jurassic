@@ -10,8 +10,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>Benchmarker</RootNamespace>
     <AssemblyName>Benchmarker</AssemblyName>
-    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
-    <TargetFrameworkProfile>Client</TargetFrameworkProfile>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <SccProjectName>
     </SccProjectName>
@@ -31,6 +30,8 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <Externalconsole>true</Externalconsole>
+    <Commandlineparameters>2</Commandlineparameters>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
     <PlatformTarget>x86</PlatformTarget>
@@ -40,6 +41,8 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <Externalconsole>true</Externalconsole>
+    <Commandlineparameters>2</Commandlineparameters>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -107,4 +110,60 @@
   <Target Name="AfterBuild">
   </Target>
   -->
+  <ItemGroup>
+    <Folder Include="Files\sunspider-1.0.2\" />
+    <Folder Include="Files\octane\" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Files\sunspider-1.0.2\3d-cube.js" />
+    <None Include="Files\sunspider-1.0.2\3d-morph.js" />
+    <None Include="Files\sunspider-1.0.2\3d-raytrace.js" />
+    <None Include="Files\sunspider-1.0.2\access-binary-trees.js" />
+    <None Include="Files\sunspider-1.0.2\access-fannkuch.js" />
+    <None Include="Files\sunspider-1.0.2\access-nbody.js" />
+    <None Include="Files\sunspider-1.0.2\access-nsieve.js" />
+    <None Include="Files\sunspider-1.0.2\bitops-3bit-bits-in-byte.js" />
+    <None Include="Files\sunspider-1.0.2\bitops-bits-in-byte.js" />
+    <None Include="Files\sunspider-1.0.2\bitops-bitwise-and.js" />
+    <None Include="Files\sunspider-1.0.2\bitops-nsieve-bits.js" />
+    <None Include="Files\sunspider-1.0.2\controlflow-recursive.js" />
+    <None Include="Files\sunspider-1.0.2\crypto-aes.js" />
+    <None Include="Files\sunspider-1.0.2\crypto-md5.js" />
+    <None Include="Files\sunspider-1.0.2\crypto-sha1.js" />
+    <None Include="Files\sunspider-1.0.2\date-format-tofte.js" />
+    <None Include="Files\sunspider-1.0.2\date-format-xparb.js" />
+    <None Include="Files\sunspider-1.0.2\math-cordic.js" />
+    <None Include="Files\sunspider-1.0.2\math-partial-sums.js" />
+    <None Include="Files\sunspider-1.0.2\math-spectral-norm.js" />
+    <None Include="Files\sunspider-1.0.2\regexp-dna.js" />
+    <None Include="Files\sunspider-1.0.2\string-base64.js" />
+    <None Include="Files\sunspider-1.0.2\string-fasta.js" />
+    <None Include="Files\sunspider-1.0.2\string-tagcloud.js" />
+    <None Include="Files\sunspider-1.0.2\string-unpack-code.js" />
+    <None Include="Files\sunspider-1.0.2\string-validate-input.js" />
+    <None Include="Files\octane\base.js" />
+    <None Include="Files\octane\box2d.js" />
+    <None Include="Files\octane\code-load.js" />
+    <None Include="Files\octane\crypto.js" />
+    <None Include="Files\octane\deltablue.js" />
+    <None Include="Files\octane\earley-boyer.js" />
+    <None Include="Files\octane\gbemu-part1.js" />
+    <None Include="Files\octane\gbemu-part2.js" />
+    <None Include="Files\octane\navier-stokes.js" />
+    <None Include="Files\octane\raytrace.js" />
+    <None Include="Files\octane\regexp.js" />
+    <None Include="Files\octane\richards.js" />
+    <None Include="Files\octane\run.js" />
+    <None Include="Files\octane\typescript-compiler.js" />
+    <None Include="Files\octane\typescript-input.js" />
+    <None Include="Files\octane\typescript.js" />
+    <None Include="Files\octane\zlib-data.js" />
+    <None Include="Files\octane\zlib.js" />
+    <None Include="Files\octane\js\bootstrap-collapse.js" />
+    <None Include="Files\octane\js\bootstrap-transition.js" />
+    <None Include="Files\octane\js\jquery.js" />
+    <None Include="Files\octane\mandreel.js.Skip" />
+    <None Include="Files\octane\pdfjs.js.Skip" />
+    <None Include="Files\octane\splay.js.Skip" />
+  </ItemGroup>
 </Project>

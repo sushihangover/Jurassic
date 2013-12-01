@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -487,8 +487,12 @@ namespace Jurassic.Compiler
                 if (this.parameterInfo == null || this.HasDefaultValue == false)
                     return null;
                 var attribute = GetCustomAttribute<DefaultParameterValueAttribute>();
-                if (attribute == null)
-                    throw new InvalidOperationException(string.Format("Expected [DefaultParameterValue] on parameter '{0}'.", this.parameterInfo.Name));
+				if (attribute == null) {
+					if (this.HasDefaultValue) {
+						return this.parameterInfo.DefaultValue;
+					} else 
+						throw new InvalidOperationException (string.Format ("Expected [DefaultParameterValue] on parameter '{0}'.", this.parameterInfo.Name));
+				}
                 if (attribute.Value == null && this.Type.IsValueType == true)
                     throw new InvalidOperationException(string.Format("Null is not a valid default value for parameter '{0}'.", this.parameterInfo.Name));
                 if (attribute.Value != null && attribute.Value.GetType() != this.Type)

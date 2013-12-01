@@ -31,9 +31,6 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Folder Include="Properties\" />
-  </ItemGroup>
-  <ItemGroup>
     <Content Include="config\excludelist.xml" />
     <Content Include="Results 2012-06-25.txt" />
     <Content Include="harness\cth.js" />
@@ -59,6 +56,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="suite\2012-05-18.zip" />
+    <None Include="suite\d067d2f0ca30_2013_06_13_10_07_0400.zip" />
+    <None Include="Results_2012-11-29_Mono_First_Full_Run.txt" />
+    <None Include="harness\testBuiltInObject.js" />
+    <None Include="harness\testIntl.js" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

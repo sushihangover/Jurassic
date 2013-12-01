@@ -108,7 +108,7 @@ namespace Jurassic.Compiler
                 {
                     // Patch the label text.
                     int offset = this.fixUps[i].BufferOffset;
-                    string labelText = string.Format("L{0:D3}", this.nextLabelNumber);
+					string labelText = string.Format("L{0:D6}", this.nextLabelNumber);
                     for (int j = 0; j < labelText.Length; j++)
                         this.log[offset + j] = labelText[j];
 
@@ -1139,7 +1139,7 @@ namespace Jurassic.Compiler
             if (this.definedLabels.TryGetValue(label, out labelNumber) == true)
             {
                 // The label is defined.
-                this.log.AppendFormat("L{0:D3}", labelNumber);
+				this.log.AppendFormat("L{0:D6}", labelNumber);
             }
 
             // The label is not defined.
@@ -1258,12 +1258,12 @@ namespace Jurassic.Compiler
             // Output the label, if there is one.
             if (this.nextInstructionHasLabel == true)
             {
-                this.log.AppendFormat("L{0:D3}: ", this.nextLabelNumber);
+				this.log.AppendFormat("L{0:D6}: ", this.nextLabelNumber);
                 this.nextInstructionHasLabel = false;
                 this.nextLabelNumber++;
             }
             else
-                this.log.Append(' ', 6);
+				this.log.Append(' ', 9);
 
             // Output the instruction.
             this.log.Append(instruction);

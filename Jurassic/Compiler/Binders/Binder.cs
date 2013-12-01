@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 
@@ -117,7 +117,7 @@ namespace Jurassic.Compiler
             System.Reflection.Emit.DynamicMethod dm;
             ILGenerator generator;
 #if !SILVERLIGHT
-            if (ScriptEngine.LowPrivilegeEnvironment == false)
+			if (ScriptEngine.LowPrivilegeEnvironment == false && (Type.GetType("Mono.Runtime") == null))
             {
                 // Full trust only - skips visibility checks.
                 dm = new System.Reflection.Emit.DynamicMethod(
@@ -125,7 +125,7 @@ namespace Jurassic.Compiler
                     typeof(object),                                                                                 // Return type of the generated method.
                     new Type[] { typeof(ScriptEngine), typeof(object), typeof(object[]) },                          // Parameter types of the generated method.
                     typeof(JSBinder),                                                                               // Owner type.
-                    true);                                                                                          // Skips visibility checks.
+					true);                                                                                          // Skips visibility checks.
                 generator = new DynamicILGenerator(dm);
             }
             else
@@ -135,7 +135,10 @@ namespace Jurassic.Compiler
                 dm = new System.Reflection.Emit.DynamicMethod(
                     string.Format("binder_for_{0}", this.FullName),                                                 // Name of the generated method.
                     typeof(object),                                                                                 // Return type of the generated method.
-                    new Type[] { typeof(ScriptEngine), typeof(object), typeof(object[]) });                         // Parameter types of the generated method.
+					new Type[] { typeof(ScriptEngine), 
+						typeof(object), 
+						typeof(object[]) }, 
+					true);                         // Parameter types of the generated method.
                 generator = new ReflectionEmitILGenerator(dm.GetILGenerator());
 #if !SILVERLIGHT
             }

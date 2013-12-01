@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Jurassic.Compiler
@@ -187,7 +187,7 @@ namespace Jurassic.Compiler
                 // Create a new dynamic method.
                 System.Reflection.Emit.DynamicMethod dynamicMethod;
 #if !SILVERLIGHT
-                if (ScriptEngine.LowPrivilegeEnvironment == false)
+				if (ScriptEngine.LowPrivilegeEnvironment == false && (Type.GetType("Mono.Runtime") == null))
                 {
                     // High privilege path.
                     dynamicMethod = new System.Reflection.Emit.DynamicMethod(
@@ -209,7 +209,10 @@ namespace Jurassic.Compiler
                 dynamicMethod = new System.Reflection.Emit.DynamicMethod(
                     GetMethodName(),                                        // Name of the generated method.
                     typeof(object),                                         // Return type of the generated method.
-                    GetParameterTypes());                                   // Parameter types of the generated method.
+						GetParameterTypes(),
+						typeof(MethodGenerator),
+						true 												// (Type.GetType("Mono.Runtime") != null)
+					);                                  					// Parameter types of the generated method.
                 generator = new ReflectionEmitILGenerator(dynamicMethod.GetILGenerator());
 #if !SILVERLIGHT
                 }
