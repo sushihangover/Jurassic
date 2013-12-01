@@ -36,13 +36,13 @@ namespace Jurassic.Library
             {
                 // This constructor is for regular Error objects.
                 // Prototype chain: Error instance -> Error prototype -> Object prototype
-                return new ErrorInstance(engine.Object.InstancePrototype, typeName, string.Empty);
+                return new ErrorInstance(engine.Object.InstancePrototype, typeName, string.Empty, false);
             }
             else
             {
                 // This constructor is for derived Error objects like RangeError, etc.
                 // Prototype chain: XXXError instance -> XXXError prototype -> Error prototype -> Object prototype
-                return new ErrorInstance(engine.Error.InstancePrototype, typeName, string.Empty);
+                return new ErrorInstance(engine.Error.InstancePrototype, typeName, string.Empty, false);
             }
         }
 
@@ -59,7 +59,7 @@ namespace Jurassic.Library
         [JSCallFunction]
         public ErrorInstance Call([DefaultParameterValue("")] string message = "")
         {
-            return new ErrorInstance(this.InstancePrototype, null, message);
+            return new ErrorInstance(this.InstancePrototype, null, message, true);
         }
 
         /// <summary>
@@ -69,7 +69,7 @@ namespace Jurassic.Library
         [JSConstructorFunction]
         public ErrorInstance Construct([DefaultParameterValue("")] string message = "")
         {
-            return new ErrorInstance(this.InstancePrototype, null, message);
+            return new ErrorInstance(this.InstancePrototype, null, message, true);
         }
 
     }

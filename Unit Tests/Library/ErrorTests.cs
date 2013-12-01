@@ -1,5 +1,8 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Jurassic;
+﻿using System;
+using System.Text;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace UnitTests
 {
@@ -42,6 +45,7 @@ namespace UnitTests
             Assert.AreEqual("RangeError: test", TestUtils.Evaluate("new RangeError('test').toString()"));
             Assert.AreEqual(false, TestUtils.Evaluate("new RangeError('test').hasOwnProperty('name')"));
             Assert.AreEqual(true, TestUtils.Evaluate("new RangeError('test').hasOwnProperty('message')"));
+            Assert.AreEqual(true, TestUtils.Evaluate("new RangeError('test').hasOwnProperty('stack')"));
             Assert.AreEqual(true, TestUtils.Evaluate("new RangeError('test').constructor === RangeError"));
 
             // Second level of the chain, the RangeError prototype.
@@ -49,6 +53,7 @@ namespace UnitTests
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(new RangeError('test')) === RangeError.prototype"));
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(new RangeError('test')).hasOwnProperty('name')"));
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(new RangeError('test')).hasOwnProperty('message')"));
+            Assert.AreEqual(false, TestUtils.Evaluate("Object.getPrototypeOf(new RangeError('test')).hasOwnProperty('stack')"));
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(new RangeError('test')).constructor === RangeError"));
 
             // Third level of the chain, the Error prototype.
@@ -56,12 +61,14 @@ namespace UnitTests
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test'))) === Error.prototype"));
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test'))).hasOwnProperty('name')"));
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test'))).hasOwnProperty('message')"));
+            Assert.AreEqual(false, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test'))).hasOwnProperty('stack')"));
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test'))).constructor === Error"));
 
             // Third level of the chain, the Object prototype.
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test')))) === Object.prototype"));
             Assert.AreEqual(false, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test')))).hasOwnProperty('name')"));
             Assert.AreEqual(false, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test')))).hasOwnProperty('message')"));
+            Assert.AreEqual(false, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test')))).hasOwnProperty('stack')"));
             Assert.AreEqual(true, TestUtils.Evaluate("Object.getPrototypeOf(Object.getPrototypeOf(Object.getPrototypeOf(new RangeError('test')))).constructor === Object"));
 
             // Prototype is null at this point.
@@ -78,12 +85,12 @@ namespace UnitTests
         [TestMethod]
         public void stack()
         {
-            Assert.AreEqual(Undefined.Value, TestUtils.Evaluate(@"new Error('hah').stack"));
+            Assert.AreEqual("Error: hah\r\n    at [eval code]:1", TestUtils.Evaluate(@"new Error('hah').stack"));
             Assert.AreEqual("Error: myError\r\n" +
-                "    at trace (unknown:4)\r\n" +
-                "    at b (unknown:11)\r\n" +
-                "    at a (unknown:14)\r\n" +
-                "    at unknown:16",
+                "    at trace ([eval code]:4)\r\n" +
+                "    at b ([eval code]:11)\r\n" +
+                "    at a ([eval code]:14)\r\n" +
+                "    at [eval code]:16",
                 TestUtils.Evaluate(@"
                     function trace() {
                         try {
@@ -100,61 +107,6 @@ namespace UnitTests
                         return b(3, 4, '\n\n', undefined, {});
                     }
                     a('first call, firstarg');"));
-            Assert.AreEqual("Error: this error is initialized at line 3, but thrown at line 5\r\n" +
-                "    at trace (unknown:5)\r\n" +
-                "    at unknown:11",
-                TestUtils.Evaluate(@"
-                    function trace() {
-                        var y = new Error('this error is initialized at line 3, but thrown at line 5');
-                        try {
-                            throw y;
-                        }
-                        catch (e) {
-                            return e.stack;
-                        }
-                    }
-                    trace()"));
-            Assert.AreEqual("URIError: URI malformed\r\n" +
-                "    at decodeURI (native)\r\n" +
-                "    at unknown:1",
-                TestUtils.Evaluate(@"try { decodeURI('%z') } catch (e) { e.stack }"));
-            Assert.AreEqual("Error: two\r\n" +
-                "    at a (unknown:13)\r\n" +
-                "    at unknown:17",
-                TestUtils.Evaluate(@"
-                    function trace() {
-                        throw new Error('one');
-                    }
-                    function b() {
-                        return trace();
-                    }
-                    function a() {
-                        try {
-                            return b(3, 4, '\n\n', undefined, {});
-                        }
-                        catch (e) {
-                            throw new Error('two');
-                        }
-                    }
-                    try {
-                        a('first call, firstarg')
-                    }
-                    catch (e) {
-                        e.stack
-                    }"));
-            Assert.AreEqual("Error: inside callback\r\n" +
-                "    at anonymous (unknown:4)\r\n" +
-                "    at sort (native)\r\n" +
-                "    at unknown:3",
-                TestUtils.Evaluate(@"
-                    try {
-                        [1, 2].sort(function () {
-                            throw new Error('inside callback');
-                        })
-                    }
-                    catch (e) {
-                        e.stack
-                    }"));
         }
     }
 }

@@ -50,7 +50,7 @@ namespace Jurassic.Compiler
         public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals() { NonDefaultSourceSpanBehavior = true };
+            var statementLocals = new StatementLocals();
             GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
 
             foreach (var declaration in this.Declarations)
@@ -58,9 +58,10 @@ namespace Jurassic.Compiler
                 if (declaration.InitExpression != null)
                 {
                     // Create a new assignment expression and generate code for it.
+                    if (optimizationInfo.DebugDocument != null)
+                        generator.MarkSequencePoint(optimizationInfo.DebugDocument, declaration.DebugInfo);
                     var initializationStatement = new ExpressionStatement(
                         new AssignmentExpression(this.Scope, declaration.VariableName, declaration.InitExpression));
-                    initializationStatement.SourceSpan = declaration.SourceSpan;
                     initializationStatement.GenerateCode(generator, optimizationInfo);
                 }
             }
@@ -128,7 +129,7 @@ namespace Jurassic.Compiler
         /// <summary>
         /// Gets or sets the portion of source code associated with the declaration.
         /// </summary>
-        public SourceCodeSpan SourceSpan { get; set; }
+        public SourceCodeSpan DebugInfo { get; set; }
     }
 
 }

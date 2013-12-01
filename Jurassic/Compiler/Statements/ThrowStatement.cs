@@ -41,9 +41,8 @@ namespace Jurassic.Compiler
             // Emit code to throw the given value.
             this.Value.GenerateCode(generator, optimizationInfo);
             EmitConversion.ToAny(generator, this.Value.ResultType);
-            generator.LoadInt32(optimizationInfo.SourceSpan.StartLine);
-            generator.LoadStringOrNull(optimizationInfo.Source.Path);
-            generator.LoadStringOrNull(optimizationInfo.FunctionName);
+            generator.LoadInt32(0);
+            generator.LoadNull();
             generator.NewObject(ReflectionHelpers.JavaScriptException_Constructor_Object);
             generator.Throw();
 

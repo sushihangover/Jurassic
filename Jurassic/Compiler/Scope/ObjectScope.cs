@@ -173,7 +173,7 @@ namespace Jurassic.Compiler
             else
             {
                 this.ScopeObjectExpression.GenerateCode(generator, optimizationInfo);
-                EmitConversion.ToObject(generator, this.ScopeObjectExpression.ResultType, optimizationInfo);
+                EmitConversion.ToObject(generator, this.ScopeObjectExpression.ResultType);
             }
             generator.LoadBoolean(this.ProvidesImplicitThisValue);
             generator.LoadBoolean(this.CanDeclareVariables);

@@ -43,7 +43,7 @@ namespace Jurassic.Compiler
         /// single-line statements this encompasses the whole statement but for multi-line (block)
         /// statements it only encompasses part of the statement.
         /// </summary>
-        public SourceCodeSpan SourceSpan
+        public SourceCodeSpan DebugInfo
         {
             get;
             set;
@@ -67,7 +67,7 @@ namespace Jurassic.Compiler
             /// handled specially by the calling code - this means that GenerateStartOfStatement()
             /// and GenerateEndOfStatement() do not have to set this information.
             /// </summary>
-            public bool NonDefaultSourceSpanBehavior;
+            public bool NonDefaultDebugInfoBehavior;
 
             /// <summary>
             /// Gets or sets a label marking the end of the statement.
@@ -104,8 +104,8 @@ namespace Jurassic.Compiler
             }
 
             // Emit debugging information.
-            if (locals.NonDefaultSourceSpanBehavior == false)
-                optimizationInfo.MarkSequencePoint(generator, this.SourceSpan);
+            if (locals.NonDefaultDebugInfoBehavior == false && optimizationInfo.DebugDocument != null && this.DebugInfo != null)
+                generator.MarkSequencePoint(optimizationInfo.DebugDocument, this.DebugInfo);
         }
 
         /// <summary>

@@ -109,7 +109,7 @@ namespace Jurassic.Compiler
         public override void GenerateCode(ILGenerator generator, OptimizationInfo optimizationInfo)
         {
             // Generate code for the start of the statement.
-            var statementLocals = new StatementLocals() { NonDefaultBreakStatementBehavior = true, NonDefaultSourceSpanBehavior = true };
+            var statementLocals = new StatementLocals() { NonDefaultBreakStatementBehavior = true, NonDefaultDebugInfoBehavior = true };
             GenerateStartOfStatement(generator, optimizationInfo, statementLocals);
 
             // <initializer>
@@ -141,7 +141,8 @@ namespace Jurassic.Compiler
             // Check the condition and jump to the end if it is false.
             if (this.CheckConditionAtEnd == false && this.ConditionStatement != null)
             {
-                optimizationInfo.MarkSequencePoint(generator, this.ConditionStatement.SourceSpan);
+                if (optimizationInfo.DebugDocument != null)
+                    generator.MarkSequencePoint(optimizationInfo.DebugDocument, this.ConditionStatement.DebugInfo);
                 this.Condition.GenerateCode(generator, optimizationInfo);
                 EmitConversion.ToBool(generator, this.Condition.ResultType);
                 generator.BranchIfFalse(breakTarget1);
@@ -203,7 +204,8 @@ namespace Jurassic.Compiler
             // Check the condition and jump to the end if it is false.
             if (this.ConditionStatement != null)
             {
-                optimizationInfo.MarkSequencePoint(generator, this.ConditionStatement.SourceSpan);
+                if (optimizationInfo.DebugDocument != null)
+                    generator.MarkSequencePoint(optimizationInfo.DebugDocument, this.ConditionStatement.DebugInfo);
                 this.Condition.GenerateCode(generator, optimizationInfo);
                 EmitConversion.ToBool(generator, this.Condition.ResultType);
                 generator.BranchIfFalse(breakTarget2);

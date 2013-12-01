@@ -89,7 +89,7 @@ namespace Jurassic.Compiler
             // Emit the second operand and convert it to the result type.
             var operand2 = this.GetOperand(1);
             operand2.GenerateCode(generator, optimizationInfo);
-            EmitConversion.Convert(generator, operand2.ResultType, outputType, optimizationInfo);
+            EmitConversion.Convert(generator, operand2.ResultType, outputType);
 
             // Branch to the end.
             var end = generator.CreateLabel();
@@ -99,7 +99,7 @@ namespace Jurassic.Compiler
             // Emit the third operand and convert it to the result type.
             var operand3 = this.GetOperand(2);
             operand3.GenerateCode(generator, optimizationInfo);
-            EmitConversion.Convert(generator, operand3.ResultType, outputType, optimizationInfo);
+            EmitConversion.Convert(generator, operand3.ResultType, outputType);
 
             // Define the end label.
             generator.DefineLabelPosition(end);
